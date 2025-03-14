@@ -100,7 +100,8 @@ export const createMp3WorkerUrl = (): string => {
   const workerCode = `
     // Import lamejs library from public path
     try {
-      importScripts('./libs/lamejs/lame.all.js');
+      // Using an absolute path to ensure the library is found
+      importScripts('/libs/lamejs/lame.all.js');
       console.log('Worker: lamejs library loaded successfully');
     } catch (e) {
       console.error('Worker: Failed to load lamejs library:', e);
@@ -124,8 +125,9 @@ export const createMp3WorkerUrl = (): string => {
         const wavDataView = new DataView(wavBuffer);
         const pcmData = new Int16Array(wavBuffer, dataOffset);
         
-        // Configure MP3 encoder
-        const mp3encoder = new lamejs.Mp3Encoder(channels, sampleRate, 128);
+        // Configure MP3 encoder with higher quality settings
+        // Increased bitrate to 192 for better quality
+        const mp3encoder = new lamejs.Mp3Encoder(channels, sampleRate, 192);
         const mp3Data = [];
         
         // Process the PCM data in chunks to avoid memory issues
@@ -167,7 +169,7 @@ export const createMp3WorkerUrl = (): string => {
             mp3buf = mp3encoder.encodeBuffer(leftChunk.subarray(0, sampleChunk.length));
           } else {
             mp3buf = mp3encoder.encodeBuffer(leftChunk.subarray(0, sampleChunk.length / 2), 
-                                             rightChunk.subarray(0, sampleChunk.length / 2));
+                                           rightChunk.subarray(0, sampleChunk.length / 2));
           }
           
           if (mp3buf && mp3buf.length > 0) {
@@ -205,7 +207,7 @@ export const createMp3WorkerUrl = (): string => {
         });
         
         // Complete the conversion and return the result
-        console.log('Worker: MP3 encoding complete, returning audio data');
+        console.log('Worker: MP3 encoding complete, returning audio data of size ' + mp3Buffer.length + ' bytes');
         self.postMessage({ 
           type: 'complete', 
           mp3Buffer: mp3Buffer.buffer,

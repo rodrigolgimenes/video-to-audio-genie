@@ -47,13 +47,18 @@ const VideoToAudio: React.FC = () => {
     }
   }, [selectedFile, extractAudio]);
 
+  // Format output size based on the file extension
+  const getFormatLabel = () => {
+    return audioFormat === 'audio/wav' ? 'WAV (não comprimido)' : 'MP3 (comprimido)';
+  };
+
   return (
     <div className="flex flex-col items-center justify-center w-full max-w-3xl mx-auto p-4">
       <Card className="w-full">
         <CardHeader>
-          <CardTitle className="text-2xl font-bold text-center">Video to Audio Converter</CardTitle>
+          <CardTitle className="text-2xl font-bold text-center">Conversor de Vídeo para Áudio</CardTitle>
           <CardDescription className="text-center">
-            Extract audio from your videos and download as {audioFormat === 'audio/wav' ? 'WAV' : 'MP3'}
+            Extraia áudio dos seus vídeos e baixe como {getFormatLabel()}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
@@ -82,20 +87,25 @@ const VideoToAudio: React.FC = () => {
               disabled={isProcessing}
             >
               <Volume2 className="mr-2 h-4 w-4" />
-              Extract Audio
+              Extrair Áudio
             </Button>
           )}
           
           {audioUrl && (
-            <DownloadButton 
-              url={audioUrl} 
-              fileName={getOutputFileName(fileName || 'audio.mp3')} 
-            />
+            <>
+              <div className="text-center text-sm text-muted-foreground mb-2">
+                Formato: {getFormatLabel()}
+              </div>
+              <DownloadButton 
+                url={audioUrl} 
+                fileName={getOutputFileName(fileName || 'audio.mp3')} 
+              />
+            </>
           )}
         </CardContent>
         <CardFooter className="flex flex-col space-y-2">
           <p className="text-xs text-muted-foreground text-center">
-            This conversion happens entirely in your browser. Your files are never uploaded to a server.
+            Esta conversão acontece inteiramente no seu navegador. Seus arquivos nunca são enviados para um servidor.
           </p>
         </CardFooter>
       </Card>
