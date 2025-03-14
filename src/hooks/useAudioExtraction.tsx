@@ -64,7 +64,7 @@ export function useAudioExtraction() {
             logger(`WARNING: lame.all.js might not be accessible (status: ${testResponse.status})`);
           }
         } catch (fetchError) {
-          logger(`WARNING: Could not check lame.all.js accessibility: ${fetchError.message}`);
+          logger(`WARNING: Could not check lame.all.js accessibility: ${(fetchError as Error).message}`);
         }
         
         try {
@@ -86,7 +86,7 @@ export function useAudioExtraction() {
           logger(`MP3 conversion successful: ${blob.size} bytes (${(blob.size / 1024 / 1024).toFixed(2)} MB)`);
           
         } catch (mp3Error) {
-          addErrorLog(`MP3 conversion failed: ${mp3Error.message}`);
+          addErrorLog(`MP3 conversion failed: ${(mp3Error as Error).message}`);
           logger('Falling back to WAV format (larger file)');
           
           // Fallback to WAV if MP3 conversion fails
@@ -104,12 +104,12 @@ export function useAudioExtraction() {
         }
         
       } catch (decodeError) {
-        throw new Error(`Failed to decode audio data: ${decodeError.message}`);
+        throw new Error(`Failed to decode audio data: ${(decodeError as Error).message}`);
       }
       
     } catch (error) {
-      setError(`Erro na conversão: ${error.message}`);
-      addErrorLog(`Error: ${error.message}`);
+      setError(`Erro na conversão: ${(error as Error).message}`);
+      addErrorLog(`Error: ${(error as Error).message}`);
     } finally {
       setIsProcessing(false);
     }

@@ -46,8 +46,8 @@ const VideoToAudio: React.FC = () => {
 
   const handleExtractAudio = useCallback(() => {
     if (selectedFile) {
-      // Always use 128kbps for smallest file size
-      extractAudio(selectedFile, 128);
+      // Always use 64kbps for smallest file size
+      extractAudio(selectedFile, 64);
     }
   }, [selectedFile, extractAudio]);
 
@@ -126,7 +126,7 @@ const VideoToAudio: React.FC = () => {
                   <div className="text-xs text-muted-foreground space-y-1 p-2 bg-muted/50 rounded-md">
                     <p>Formato: {audioFormat}</p>
                     <p>Tamanho: {formatFileSize(audioSize)}</p>
-                    <p>Qualidade: 128kbps (máxima compressão)</p>
+                    <p>Qualidade: 64kbps (máxima compressão)</p>
                     <p>Arquivo original: {formatFileSize(selectedFile?.size)}</p>
                     <p>Redução: {selectedFile?.size && audioSize ? 
                       `${((1 - audioSize / selectedFile.size) * 100).toFixed(0)}%` : 'N/A'}</p>

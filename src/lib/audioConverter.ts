@@ -74,9 +74,10 @@ export async function convertAudioBufferToMp3(
       // First convert to WAV for processing
       const wavBuffer = convertAudioBufferToWav(audioBuffer);
       
-      // Create a worker with inline code
+      // Create a worker with inline code - Fixed to avoid "Illegal return statement" error
       const workerCode = `
-        // Import lamejs library from public path
+        // Worker for MP3 encoding using lamejs
+        
         self.addEventListener('error', function(e) {
           console.error('Worker global error:', e.message);
           self.postMessage({ type: 'error', error: 'Worker error: ' + e.message });
@@ -84,18 +85,23 @@ export async function convertAudioBufferToMp3(
 
         console.log('Worker: Starting to load lamejs library...');
         
+        // Variable to track lamejs loading state
+        let lameLoaded = false;
+        
         try {
-          // CRITICAL FIX: Use absolute path and log the attempt
+          // Use correct path for importScripts
           console.log('Worker: Attempting to load lamejs from /libs/lamejs/lame.all.js');
           importScripts('/libs/lamejs/lame.all.js');
           
           // Check if lamejs is actually loaded
-          if (typeof lamejs === 'undefined') {
+          if (typeof self.lamejs === 'undefined') {
+            console.error('Worker: lamejs was not defined after importScripts!');
             throw new Error('lamejs was not defined after importScripts');
           }
           
-          console.log('Worker: lamejs library loaded successfully', typeof lamejs);
-          console.log('Worker: lamejs Mp3Encoder available:', typeof lamejs.Mp3Encoder);
+          console.log('Worker: lamejs library loaded successfully', typeof self.lamejs);
+          console.log('Worker: lamejs Mp3Encoder available:', typeof self.lamejs.Mp3Encoder);
+          lameLoaded = true;
         } catch (e) {
           console.error('Worker: Failed to load lamejs library:', e);
           console.error('Worker: Error details:', e.stack || 'No stack trace');
@@ -107,15 +113,19 @@ export async function convertAudioBufferToMp3(
         }
 
         self.onmessage = function(e) {
-          const { wavBuffer, channels, sampleRate, quality } = e.data;
-          
-          console.log('Worker: Starting MP3 encoding with ' + quality + 'kbps quality');
-          console.log('Worker: Input stats:', { channels, sampleRate, wavBufferSize: wavBuffer.byteLength });
-          
           try {
+            const { wavBuffer, channels, sampleRate, quality } = e.data;
+            
+            console.log('Worker: Starting MP3 encoding with ' + quality + 'kbps quality');
+            console.log('Worker: Input stats:', { channels, sampleRate, wavBufferSize: wavBuffer.byteLength });
+            
+            if (!lameLoaded) {
+              throw new Error('Cannot encode MP3: lamejs library not loaded');
+            }
+            
             // Create MP3 encoder
             console.log('Worker: Creating Mp3Encoder instance');
-            const mp3encoder = new lamejs.Mp3Encoder(channels, sampleRate, quality);
+            const mp3encoder = new self.lamejs.Mp3Encoder(channels, sampleRate, quality);
             console.log('Worker: Mp3Encoder created successfully');
             
             // Get WAV samples as float32, we need to convert to int16
@@ -235,7 +245,9 @@ export async function convertAudioBufferToMp3(
       // Create the worker
       const workerBlob = new Blob([workerCode], { type: 'application/javascript' });
       const workerUrl = URL.createObjectURL(workerBlob);
-      const worker = new Worker(workerUrl);
+      const worker = new Worker(workerUrl); // Use classic worker mode, not module
+
+      log('Worker created and started');
       
       // Error timeout (30 seconds)
       const errorTimeout = setTimeout(() => {
@@ -289,7 +301,7 @@ export async function convertAudioBufferToMp3(
       
       log('WAV data sent to worker for processing');
     } catch (error) {
-      log(`Error starting conversion: ${error.message}`);
+      log(`Error starting conversion: ${(error as Error).message}`);
       reject(error);
     }
   });
