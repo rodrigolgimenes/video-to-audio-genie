@@ -1,3 +1,4 @@
+
 // Function to read a file as an ArrayBuffer
 export const readFileAsArrayBuffer = (file: File): Promise<ArrayBuffer> => {
   return new Promise((resolve, reject) => {
@@ -98,7 +99,17 @@ export const createMp3WorkerUrl = (): string => {
   // Updated worker code that uses lamejs to properly convert WAV to MP3
   const workerCode = `
     // Import lamejs library from public path
-    importScripts('/libs/lamejs/lame.all.js');
+    try {
+      importScripts('./libs/lamejs/lame.all.js');
+      console.log('Worker: lamejs library loaded successfully');
+    } catch (e) {
+      console.error('Worker: Failed to load lamejs library:', e);
+      self.postMessage({ 
+        type: 'error', 
+        error: 'Failed to load MP3 encoder library: ' + e.message
+      });
+      return;
+    }
 
     self.onmessage = function(e) {
       const { wavBuffer, channels, sampleRate } = e.data;

@@ -1,10 +1,12 @@
 
-// IMPORTANT: Replace this file with the actual lame.all.js from node_modules/lamejs/lame.all.js
-// This is just a placeholder. You must manually copy the file from the node_modules directory.
+// IMPORTANTE: Substitua este arquivo com o conteúdo real do lame.all.js
+// Este é apenas um placeholder. Você precisa copiar manualmente o arquivo do diretório node_modules.
 // 
-// To do this:
-// 1. Find the lamejs package in your node_modules: node_modules/lamejs/lame.all.js
-// 2. Copy the entire contents of that file
-// 3. Paste it here, replacing this entire comment
+// Para fazer isso:
+// 1. Encontre o pacote lamejs em node_modules: node_modules/lamejs/lame.all.js
+// 2. Copie o conteúdo inteiro desse arquivo
+// 3. Cole aqui, substituindo todo este comentário
 //
-// The application will not work correctly until you complete this step.
+// O aplicativo não funcionará corretamente até que você complete este passo.
+// Para verificar se o arquivo está no lugar certo, acesse: http://localhost:5173/libs/lamejs/lame.all.js no navegador
+// Você deve ver o código JavaScript da biblioteca lame, não este comentário.

@@ -1,21 +1,30 @@
 
-# lamejs Library for Web Workers
+# Biblioteca lamejs para Web Workers
 
-This directory contains the lamejs library for MP3 encoding in Web Workers.
+Este diretório contém a biblioteca lamejs para codificação MP3 em Web Workers.
 
-## Setup Instructions
+## Instruções de Configuração
 
-1. Copy the `lame.all.js` file from `node_modules/lamejs/lame.all.js` to this folder (`public/libs/lamejs/lame.all.js`).
-2. No modifications to the file are needed, just a direct copy.
+1. Copie o arquivo `lame.all.js` de `node_modules/lamejs/lame.all.js` para esta pasta (`public/libs/lamejs/lame.all.js`).
+2. Nenhuma modificação no arquivo é necessária, apenas uma cópia direta.
+3. Verifique se o arquivo está acessível visitando: `http://localhost:5173/libs/lamejs/lame.all.js` (ajuste a URL conforme a porta do seu servidor de desenvolvimento).
 
-This setup is necessary because Web Workers cannot directly import npm modules, so we need to make the library publicly available.
+Esta configuração é necessária porque Web Workers não podem importar módulos npm diretamente, então precisamos disponibilizar a biblioteca publicamente.
 
-## Implementation Note
+## Nota de Implementação
 
-The Web Worker in our audio converter loads this library using:
+O Web Worker em nosso conversor de áudio carrega esta biblioteca usando:
 
 ```javascript
-importScripts('/libs/lamejs/lame.all.js');
+importScripts('./libs/lamejs/lame.all.js');
 ```
 
-This gives the worker access to a global `lamejs` object that contains the MP3 encoding functionality.
+Isso dá ao worker acesso a um objeto global `lamejs` que contém a funcionalidade de codificação MP3.
+
+## Solução de Problemas
+
+Se o conversor continuar a usar WAV em vez de MP3, verifique:
+
+1. Se você copiou corretamente o arquivo `lame.all.js` para a pasta correta
+2. Se o arquivo está acessível pela URL correta (teste no navegador)
+3. Se não há erros no console relacionados ao carregamento da biblioteca
