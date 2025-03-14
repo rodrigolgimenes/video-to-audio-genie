@@ -57,81 +57,104 @@ export const useAudioExtraction = () => {
         let conversionAttempts = 0;
         const maxAttempts = 3;
         let finalBuffer: ArrayBuffer | null = null;
-        let format = 'audio/wav'; // Default to WAV
+        let format = 'audio/mpeg'; // Default to MP3
         
         while (finalBuffer === null && conversionAttempts < maxAttempts) {
           conversionAttempts++;
           
           try {
-            // Track progress updates
-            let lastProgress = 0;
-            let conversionComplete = false;
-            
-            // Start the conversion process
-            const processingPromise = convertWavToMp3(
-              wavBuffer.slice(0), // Create a copy since the worker consumes the original
-              audioBuffer.numberOfChannels,
-              audioBuffer.sampleRate
-            );
-            
-            // Since we need to handle multiple progress updates, we'll use
-            // the promise differently
-            processingPromise.then(
-              ({ mp3Buffer, progress, format: workerFormat }) => {
-                // Update progress state
-                if (progress > lastProgress) {
-                  lastProgress = progress;
-                  setProgress(progress * 100);
-                  
-                  // Only log significant progress changes
-                  if (Math.floor(progress * 10) > Math.floor(lastProgress * 10)) {
-                    addLog(`Processing progress: ${Math.round(progress * 100)}%`);
-                  }
+            // Progress update handler
+            const handleProgressUpdate = ({ mp3Buffer, progress, format: workerFormat }: { 
+              mp3Buffer: ArrayBuffer, 
+              progress: number, 
+              format?: string 
+            }) => {
+              setProgress(progress * 100);
+              
+              // Only log significant progress changes
+              if (Math.floor(progress * 10) % 2 === 0) {
+                addLog(`Processing progress: ${Math.round(progress * 100)}%`);
+              }
+              
+              // When complete, update the audio URL
+              if (progress === 1 && mp3Buffer.byteLength > 0) {
+                finalBuffer = mp3Buffer;
+                
+                if (workerFormat) {
+                  format = workerFormat;
                 }
                 
-                // If conversion is complete (progress === 1)
-                if (progress === 1 && !conversionComplete) {
-                  conversionComplete = true;
-                  finalBuffer = mp3Buffer;
-                  
-                  if (workerFormat) {
-                    format = workerFormat;
-                  }
-                  
-                  addLog(`Processing complete (${finalBuffer.byteLength} bytes) as ${format}`);
-                  
-                  // Create the audio blob and URL
-                  const audioBlob = new Blob([finalBuffer], { type: format });
-                  setAudioFormat(format);
-                  const url = URL.createObjectURL(audioBlob);
-                  setAudioUrl(url);
-                  
-                  toast({
-                    title: "Conversion complete!",
-                    description: "Your audio file is ready for download."
-                  });
-                  
-                  addLog("Conversion process completed successfully");
-                  setIsProcessing(false);
-                }
-              },
-              (error) => {
-                throw error;
+                addLog(`Processing complete (${finalBuffer.byteLength} bytes) as ${format}`);
+                
+                // Create the audio blob and URL
+                const audioBlob = new Blob([finalBuffer], { type: format });
+                setAudioFormat(format);
+                const url = URL.createObjectURL(audioBlob);
+                setAudioUrl(url);
+                
+                toast({
+                  title: "Conversion complete!",
+                  description: `Your audio file is ready for download as ${format === 'audio/mpeg' ? 'MP3' : 'WAV'}.`
+                });
+                
+                addLog("Conversion process completed successfully");
+                setIsProcessing(false);
+                return true;
               }
-            );
+              return false;
+            };
             
-            // Wait up to 10 seconds for conversion to complete
-            let timeWaited = 0;
-            while (finalBuffer === null && timeWaited < 10000 && !conversionComplete) {
-              await new Promise(r => setTimeout(r, 500));
-              timeWaited += 500;
-            }
+            // Start the conversion process
+            addLog(`Starting conversion attempt ${conversionAttempts}`);
             
-            // If conversion is taking too long, we'll try again or fall back to WAV
-            if (finalBuffer === null && !conversionComplete) {
+            try {
+              // Create a copy of the WAV buffer for this attempt
+              const wavBufferCopy = wavBuffer.slice(0);
+              
+              // Start the conversion with a timeout
+              let conversionTimeout: NodeJS.Timeout | null = null;
+              
+              const conversionPromise = new Promise<boolean>((resolve, reject) => {
+                // Set a timeout to cancel this attempt if it takes too long
+                conversionTimeout = setTimeout(() => {
+                  reject(new Error("Conversion timed out"));
+                }, 60000); // 60 seconds timeout
+                
+                convertWavToMp3(
+                  wavBufferCopy,
+                  audioBuffer.numberOfChannels,
+                  audioBuffer.sampleRate
+                )
+                  .then(result => {
+                    if (conversionTimeout) {
+                      clearTimeout(conversionTimeout);
+                      conversionTimeout = null;
+                    }
+                    const isComplete = handleProgressUpdate(result);
+                    resolve(isComplete);
+                  })
+                  .catch(error => {
+                    if (conversionTimeout) {
+                      clearTimeout(conversionTimeout);
+                      conversionTimeout = null;
+                    }
+                    reject(error);
+                  });
+              });
+              
+              const isComplete = await conversionPromise;
+              
+              if (isComplete) {
+                break; // Exit the retry loop if conversion was successful
+              }
+            } catch (innerError) {
+              const errorMessage = innerError instanceof Error ? innerError.message : 'Unknown conversion error';
+              addLog(`Conversion error: ${errorMessage}`);
+              
               if (conversionAttempts >= maxAttempts) {
+                addLog("Maximum conversion attempts reached, falling back to WAV format");
+                
                 // Fall back to WAV if MP3 conversion failed
-                addLog("MP3 conversion timed out, falling back to WAV format");
                 finalBuffer = wavBuffer.slice(0);
                 format = 'audio/wav';
                 
@@ -147,16 +170,18 @@ export const useAudioExtraction = () => {
                 });
                 
                 addLog("Conversion process completed with WAV fallback");
+                setIsProcessing(false);
               } else {
-                addLog(`Conversion attempt ${conversionAttempts} timed out, retrying...`);
+                addLog(`Retrying conversion (attempt ${conversionAttempts + 1} of ${maxAttempts})`);
               }
             }
           } catch (conversionError) {
             addLog(`Error in audio processing: ${conversionError instanceof Error ? conversionError.message : 'Unknown error'}`);
+            
             if (conversionAttempts >= maxAttempts) {
               throw conversionError;
             } else {
-              addLog(`Retrying conversion (attempt ${conversionAttempts + 1})`);
+              addLog(`Retrying conversion (attempt ${conversionAttempts + 1} of ${maxAttempts})`);
             }
           }
         }

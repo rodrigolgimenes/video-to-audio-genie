@@ -96,44 +96,114 @@ const writeString = (view: DataView, offset: number, string: string): void => {
 
 // Create a Blob URL for the worker script
 export const createMp3WorkerUrl = (): string => {
-  // Fixed worker code that properly terminates and returns a result
+  // Updated worker code that uses lamejs to properly convert WAV to MP3
   const workerCode = `
+    // Import lamejs library
+    importScripts('https://cdn.jsdelivr.net/npm/lamejs@1.2.1/lame.min.js');
+
     self.onmessage = function(e) {
       const { wavBuffer, channels, sampleRate } = e.data;
       console.log('Worker: Received WAV data (size: ' + wavBuffer.byteLength + ')');
       
       try {
-        // Fixed progress reporting
-        const totalUpdates = 10;
-        let currentUpdate = 0;
+        // Parse the WAV header to find where the PCM data starts
+        // WAV header is typically 44 bytes
+        const dataOffset = 44;
         
-        // Set up progress interval
-        const progressInterval = setInterval(() => {
-          currentUpdate++;
-          const progress = currentUpdate / totalUpdates;
+        // Create a view of the buffer so we can read the PCM data
+        const wavDataView = new DataView(wavBuffer);
+        const pcmData = new Int16Array(wavBuffer, dataOffset);
+        
+        // Configure MP3 encoder
+        const mp3encoder = new lamejs.Mp3Encoder(channels, sampleRate, 128);
+        const mp3Data = [];
+        
+        // Process the PCM data in chunks to avoid memory issues
+        const sampleBlockSize = 1152; // This must be a multiple of 576 for lamejs
+        const totalSamples = pcmData.length;
+        const totalChunks = Math.ceil(totalSamples / sampleBlockSize);
+        let currentChunk = 0;
+        
+        // Setup progress tracking
+        const reportProgressInterval = Math.max(1, Math.floor(totalChunks / 20)); // Report ~20 updates
+        
+        // Convert each chunk
+        for (let i = 0; i < totalSamples; i += sampleBlockSize) {
+          // Extract a block of samples
+          const sampleChunk = pcmData.subarray(i, Math.min(i + sampleBlockSize, totalSamples));
           
-          // Post progress message
-          self.postMessage({ 
-            type: 'progress', 
-            progress: progress
-          });
+          // Convert to the format needed by lamejs
+          const leftChunk = new Int16Array(sampleBlockSize);
+          const rightChunk = new Int16Array(sampleBlockSize);
           
-          // When we reach the end, clear interval and return result
-          if (currentUpdate >= totalUpdates) {
-            clearInterval(progressInterval);
-            
-            // Complete the conversion and return the result
-            console.log('Worker: Process complete, returning audio data');
-            self.postMessage({ 
-              type: 'complete', 
-              mp3Buffer: wavBuffer,
-              format: 'audio/wav'
-            }, [wavBuffer]);
-            
-            // Clean up - ensure worker can be terminated
-            setTimeout(() => self.close(), 100);
+          // Fill the channels based on the input
+          if (channels === 1) {
+            // Mono: copy the same data to both channels
+            for (let j = 0; j < sampleChunk.length; j++) {
+              leftChunk[j] = sampleChunk[j];
+              rightChunk[j] = sampleChunk[j];
+            }
+          } else {
+            // Stereo: alternate samples for left and right channels
+            for (let j = 0, k = 0; j < sampleChunk.length; j += 2, k++) {
+              leftChunk[k] = sampleChunk[j];
+              rightChunk[k] = sampleChunk[j + 1];
+            }
           }
-        }, 200);
+          
+          // Encode this chunk
+          let mp3buf;
+          if (channels === 1) {
+            mp3buf = mp3encoder.encodeBuffer(leftChunk.subarray(0, sampleChunk.length));
+          } else {
+            mp3buf = mp3encoder.encodeBuffer(leftChunk.subarray(0, sampleChunk.length / 2), 
+                                             rightChunk.subarray(0, sampleChunk.length / 2));
+          }
+          
+          if (mp3buf && mp3buf.length > 0) {
+            mp3Data.push(mp3buf);
+          }
+          
+          // Report progress
+          currentChunk++;
+          if (currentChunk % reportProgressInterval === 0 || currentChunk === totalChunks) {
+            const progressPercentage = currentChunk / totalChunks;
+            self.postMessage({ 
+              type: 'progress', 
+              progress: progressPercentage
+            });
+          }
+        }
+        
+        // Finalize the MP3
+        const mp3buf = mp3encoder.flush();
+        if (mp3buf && mp3buf.length > 0) {
+          mp3Data.push(mp3buf);
+        }
+        
+        // Combine all chunks into a single buffer
+        let totalLength = 0;
+        mp3Data.forEach(buffer => {
+          totalLength += buffer.length;
+        });
+        
+        const mp3Buffer = new Uint8Array(totalLength);
+        let offset = 0;
+        mp3Data.forEach(buffer => {
+          mp3Buffer.set(buffer, offset);
+          offset += buffer.length;
+        });
+        
+        // Complete the conversion and return the result
+        console.log('Worker: MP3 encoding complete, returning audio data');
+        self.postMessage({ 
+          type: 'complete', 
+          mp3Buffer: mp3Buffer.buffer,
+          format: 'audio/mpeg'
+        }, [mp3Buffer.buffer]);
+        
+        // Clean up - ensure worker can be terminated
+        setTimeout(() => self.close(), 100);
       } catch (err) {
         console.error('Worker error:', err);
         self.postMessage({ 
@@ -160,23 +230,29 @@ export const convertWavToMp3 = (wavBuffer: ArrayBuffer, channels: number, sample
   return new Promise((resolve, reject) => {
     console.log(`Starting audio conversion: channels=${channels}, sampleRate=${sampleRate}, wavBuffer size=${wavBuffer.byteLength}`);
     const worker = createMp3ConversionWorker();
+    let lastProgressReported = false;
     
     worker.onmessage = (event) => {
-      const { type, mp3Buffer, progress, format } = event.data;
+      const { type, mp3Buffer, progress, format, error } = event.data;
       
       if (type === 'progress') {
         console.log(`Conversion progress: ${Math.round(progress * 100)}%`);
+        
         // If it's a progress update, we don't resolve yet but can report progress
-        resolve({ mp3Buffer: new ArrayBuffer(0), progress, format });
+        // Don't resolve for progress updates as the promise can only resolve once
+        if (!lastProgressReported) {
+          resolve({ mp3Buffer: new ArrayBuffer(0), progress, format });
+          lastProgressReported = true;
+        }
       } else if (type === 'complete') {
         // Once complete, resolve with the final buffer
         console.log(`Conversion complete: buffer size=${mp3Buffer.byteLength}`);
         worker.terminate();
         resolve({ mp3Buffer, progress: 1, format });
       } else if (type === 'error') {
-        console.error("Worker error:", event.data.error);
+        console.error("Worker error:", error);
         worker.terminate();
-        reject(new Error(`Conversion failed: ${event.data.error}`));
+        reject(new Error(`Conversion failed: ${error}`));
       }
     };
     
