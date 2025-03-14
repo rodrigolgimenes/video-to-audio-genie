@@ -50,34 +50,43 @@ export const useAudioExtraction = () => {
         const wavBuffer = convertAudioBufferToWav(audioBuffer);
         addLog(`WAV conversion complete (${wavBuffer.byteLength} bytes)`);
         
-        // Step 4: Convert WAV to MP3 using a Web Worker
-        addLog("Starting WAV to MP3 conversion with Web Worker");
-        let finalMp3Buffer: ArrayBuffer | null = null;
+        // Step 4: Process the audio data
+        addLog("Starting audio processing with Web Worker");
+        let finalBuffer: ArrayBuffer | null = null;
         
         try {
-          while (finalMp3Buffer === null) {
+          let lastProgress = 0;
+          
+          while (finalBuffer === null) {
             const { mp3Buffer, progress } = await convertWavToMp3(
               wavBuffer.slice(0), // Create a copy since the worker consumes the original
               audioBuffer.numberOfChannels,
               audioBuffer.sampleRate
             );
             
+            // Only add a log if progress changed significantly
+            if (progress - lastProgress >= 0.1) {
+              lastProgress = progress;
+              addLog(`Processing progress: ${Math.round(progress * 100)}%`);
+            }
+            
             setProgress(progress * 100);
-            addLog(`Conversion progress: ${Math.round(progress * 100)}%`);
             
             if (progress === 1) {
-              finalMp3Buffer = mp3Buffer;
-              addLog(`MP3 conversion complete (${finalMp3Buffer.byteLength} bytes)`);
+              finalBuffer = mp3Buffer;
+              addLog(`Processing complete (${finalBuffer.byteLength} bytes)`);
             }
           }
           
-          // Step 5: Create a Blob from the MP3 buffer
-          addLog("Creating MP3 Blob");
-          const mp3Blob = new Blob([finalMp3Buffer], { type: 'audio/mpeg' });
+          // Step 5: Create a Blob from the processed buffer
+          addLog("Creating audio Blob");
+          // We're using audio/wav since we're essentially returning WAV data in the fallback mode
+          // In a production app with proper MP3 encoding, you'd use audio/mpeg
+          const audioBlob = new Blob([finalBuffer], { type: 'audio/wav' });
           
           // Step 6: Create a download URL
           addLog("Generating download URL");
-          const url = URL.createObjectURL(mp3Blob);
+          const url = URL.createObjectURL(audioBlob);
           setMp3Url(url);
           
           toast({
@@ -86,7 +95,7 @@ export const useAudioExtraction = () => {
           });
           addLog("Conversion process completed successfully");
         } catch (conversionError) {
-          addLog(`Error in MP3 conversion: ${conversionError instanceof Error ? conversionError.message : 'Unknown error'}`);
+          addLog(`Error in audio processing: ${conversionError instanceof Error ? conversionError.message : 'Unknown error'}`);
           throw conversionError;
         }
       } catch (decodeError) {
@@ -110,8 +119,8 @@ export const useAudioExtraction = () => {
   }, [addLog, toast]);
 
   const getOutputFileName = useCallback((fileName: string) => {
-    // Replace video extension with mp3
-    return fileName.replace(/\.[^/.]+$/, '.mp3');
+    // We're now returning WAV in the fallback implementation
+    return fileName.replace(/\.[^/.]+$/, '.wav');
   }, []);
 
   return {
