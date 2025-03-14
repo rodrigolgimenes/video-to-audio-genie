@@ -1,4 +1,3 @@
-
 // Function to read a file as an ArrayBuffer
 export const readFileAsArrayBuffer = (file: File): Promise<ArrayBuffer> => {
   return new Promise((resolve, reject) => {
