@@ -1,296 +1,267 @@
-// Function to read a file as an ArrayBuffer
-export const readFileAsArrayBuffer = (file: File): Promise<ArrayBuffer> => {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result as ArrayBuffer);
-    reader.onerror = (event) => {
-      console.error("FileReader error:", event);
-      reject(new Error("Failed to read the file"));
-    };
-    reader.readAsArrayBuffer(file);
-  });
-};
+import { log } from './logger';
 
-// Function to decode audio data from an ArrayBuffer
-export const decodeAudioData = async (audioContext: AudioContext, arrayBuffer: ArrayBuffer): Promise<AudioBuffer> => {
-  try {
-    console.log(`Attempting to decode audio data of size ${arrayBuffer.byteLength} bytes`);
-    
-    // Clone the buffer to avoid "buffer detached" errors
-    const bufferCopy = arrayBuffer.slice(0);
-    
-    try {
-      const result = await audioContext.decodeAudioData(bufferCopy);
-      console.log(`Audio successfully decoded: ${result.numberOfChannels} channels, ${result.sampleRate}Hz, ${result.length} samples`);
-      return result;
-    } catch (decodeError) {
-      console.error("Browser decodeAudioData failed:", decodeError);
-      
-      // Try an alternative approach for specific errors
-      if (decodeError instanceof DOMException && decodeError.name === "EncodingError") {
-        console.log("Trying alternative decoding method...");
-        // Here you could implement an alternative decoder or fallback
-      }
-      
-      throw new Error(`Failed to decode audio: ${decodeError instanceof Error ? decodeError.message : 'Unknown error'}`);
-    }
-  } catch (error) {
-    console.error("Error in decodeAudioData function:", error);
-    throw new Error("Failed to decode audio from video. The video format might not be supported.");
-  }
-};
-
-// Convert AudioBuffer to WAV format
-export const convertAudioBufferToWav = (audioBuffer: AudioBuffer): ArrayBuffer => {
-  const numOfChannels = audioBuffer.numberOfChannels;
-  const length = audioBuffer.length * numOfChannels * 2; // 2 bytes per sample
+// AudioBuffer to WAV converter (only as fallback if MP3 conversion fails)
+export function convertAudioBufferToWav(audioBuffer: AudioBuffer): ArrayBuffer {
+  const numberOfChannels = audioBuffer.numberOfChannels;
   const sampleRate = audioBuffer.sampleRate;
-  
-  // Create the WAV file header
-  const buffer = new ArrayBuffer(44 + length);
-  const view = new DataView(buffer);
-  
-  // RIFF chunk descriptor
-  writeString(view, 0, 'RIFF');
-  view.setUint32(4, 36 + length, true);
-  writeString(view, 8, 'WAVE');
-  
-  // fmt sub-chunk
-  writeString(view, 12, 'fmt ');
-  view.setUint32(16, 16, true);
-  view.setUint16(20, 1, true); // PCM format
-  view.setUint16(22, numOfChannels, true);
-  view.setUint32(24, sampleRate, true);
-  view.setUint32(28, sampleRate * numOfChannels * 2, true); // byte rate
-  view.setUint16(32, numOfChannels * 2, true); // block align
-  view.setUint16(34, 16, true); // bits per sample
-  
-  // data sub-chunk
-  writeString(view, 36, 'data');
-  view.setUint32(40, length, true);
-  
-  // Write the PCM samples
-  const data = new Int16Array(buffer, 44, length / 2);
-  let offset = 0;
-  
-  for (let i = 0; i < numOfChannels; i++) {
-    const channelData = audioBuffer.getChannelData(i);
-    for (let j = 0; j < audioBuffer.length; j++) {
-      // Convert Float32 to Int16
-      const index = (j * numOfChannels) + i;
-      const sample = Math.max(-1, Math.min(1, channelData[j]));
-      data[index] = sample < 0 ? sample * 0x8000 : sample * 0x7FFF;
-    }
-  }
-  
-  return buffer;
-};
+  const length = audioBuffer.length;
 
-// Helper function to write a string to a DataView
-const writeString = (view: DataView, offset: number, string: string): void => {
+  const buffer = new ArrayBuffer(44 + length * numberOfChannels * 2);
+  const view = new DataView(buffer);
+
+  /* RIFF identifier */
+  writeUTFBytes(view, 0, 'RIFF');
+  /* RIFF chunk length */
+  view.setUint32(4, 36 + length * numberOfChannels * 2, true);
+  /* RIFF type format */
+  writeUTFBytes(view, 8, 'WAVE');
+  /* format chunk identifier */
+  writeUTFBytes(view, 12, 'fmt ');
+  /* format chunk length */
+  view.setUint32(16, 16, true);
+  /* sample format (raw) */
+  view.setUint16(20, 1, true);
+  /* channel count */
+  view.setUint16(22, numberOfChannels, true);
+  /* sample rate */
+  view.setUint32(24, sampleRate, true);
+  /* byte rate (sample rate * block align) */
+  view.setUint32(28, sampleRate * numberOfChannels * 2, true);
+  /* block align (channel count * bytes per sample) */
+  view.setUint16(32, numberOfChannels * 2, true);
+  /* bits per sample */
+  view.setUint16(34, 16, true);
+  /* data chunk identifier */
+  writeUTFBytes(view, 36, 'data');
+  /* data chunk length */
+  view.setUint32(40, length * numberOfChannels * 2, true);
+
+  floatTo16BitPCM(view, 44, audioBuffer);
+
+  return buffer;
+}
+
+function writeUTFBytes(view: DataView, offset: number, string: string) {
   for (let i = 0; i < string.length; i++) {
     view.setUint8(offset + i, string.charCodeAt(i));
   }
-};
+}
 
-// Create a Blob URL for the worker script
-export const createMp3WorkerUrl = (): string => {
-  // Updated worker code that uses lamejs to properly convert WAV to MP3
-  const workerCode = `
-    // Import lamejs library from public path
-    try {
-      // Using a relative path to ensure the library is found - important fix
-      importScripts('./libs/lamejs/lame.all.js');
-      console.log('Worker: lamejs library loaded successfully');
-    } catch (e) {
-      console.error('Worker: Failed to load lamejs library:', e);
-      self.postMessage({ 
-        type: 'error', 
-        error: 'Failed to load MP3 encoder library: ' + e.message
-      });
-    }
+function floatTo16BitPCM(view: DataView, offset: number, audioBuffer: AudioBuffer) {
+  const buffer = audioBuffer.getChannelData(0);
+  const length = buffer.length;
+  let index = offset;
 
-    self.onmessage = function(e) {
-      const { wavBuffer, channels, sampleRate, quality } = e.data;
-      console.log('Worker: Received WAV data (size: ' + wavBuffer.byteLength + ') with quality ' + quality + 'kbps');
-      
-      try {
-        // Parse the WAV header to find where the PCM data starts
-        // WAV header is typically 44 bytes
-        const dataOffset = 44;
-        
-        // Create a view of the buffer so we can read the PCM data
-        const wavDataView = new DataView(wavBuffer);
-        const pcmData = new Int16Array(wavBuffer, dataOffset);
-        
-        // Configure MP3 encoder with specified quality
-        const mp3encoder = new lamejs.Mp3Encoder(channels, sampleRate, quality || 192);
-        const mp3Data = [];
-        
-        // Process the PCM data in chunks to avoid memory issues
-        const sampleBlockSize = 1152; // This must be a multiple of 576 for lamejs
-        const totalSamples = pcmData.length;
-        const totalChunks = Math.ceil(totalSamples / sampleBlockSize);
-        let currentChunk = 0;
-        
-        // Setup progress tracking
-        const reportProgressInterval = Math.max(1, Math.floor(totalChunks / 20)); // Report ~20 updates
-        
-        // Convert each chunk
-        for (let i = 0; i < totalSamples; i += sampleBlockSize) {
-          // Extract a block of samples
-          const sampleChunk = pcmData.subarray(i, Math.min(i + sampleBlockSize, totalSamples));
-          
-          // Convert to the format needed by lamejs
-          const leftChunk = new Int16Array(sampleBlockSize);
-          const rightChunk = new Int16Array(sampleBlockSize);
-          
-          // Fill the channels based on the input
-          if (channels === 1) {
-            // Mono: copy the same data to both channels
-            for (let j = 0; j < sampleChunk.length; j++) {
-              leftChunk[j] = sampleChunk[j];
-              rightChunk[j] = sampleChunk[j];
-            }
-          } else {
-            // Stereo: alternate samples for left and right channels
-            for (let j = 0, k = 0; j < sampleChunk.length; j += 2, k++) {
-              leftChunk[k] = sampleChunk[j];
-              rightChunk[k] = sampleChunk[j + 1];
-            }
-          }
-          
-          // Encode this chunk
-          let mp3buf;
-          if (channels === 1) {
-            mp3buf = mp3encoder.encodeBuffer(leftChunk.subarray(0, sampleChunk.length));
-          } else {
-            mp3buf = mp3encoder.encodeBuffer(leftChunk.subarray(0, sampleChunk.length / 2), 
-                                           rightChunk.subarray(0, sampleChunk.length / 2));
-          }
-          
-          if (mp3buf && mp3buf.length > 0) {
-            mp3Data.push(mp3buf);
-          }
-          
-          // Report progress
-          currentChunk++;
-          if (currentChunk % reportProgressInterval === 0 || currentChunk === totalChunks) {
-            const progressPercentage = currentChunk / totalChunks;
-            self.postMessage({ 
-              type: 'progress', 
-              progress: progressPercentage
-            });
-          }
-        }
-        
-        // Finalize the MP3
-        const mp3buf = mp3encoder.flush();
-        if (mp3buf && mp3buf.length > 0) {
-          mp3Data.push(mp3buf);
-        }
-        
-        // Combine all chunks into a single buffer
-        let totalLength = 0;
-        mp3Data.forEach(buffer => {
-          totalLength += buffer.length;
-        });
-        
-        const mp3Buffer = new Uint8Array(totalLength);
-        let offset = 0;
-        mp3Data.forEach(buffer => {
-          mp3Buffer.set(buffer, offset);
-          offset += buffer.length;
-        });
-        
-        // Complete the conversion and return the result
-        console.log('Worker: MP3 encoding complete, returning audio data of size ' + mp3Buffer.length + ' bytes');
-        self.postMessage({ 
-          type: 'complete', 
-          mp3Buffer: mp3Buffer.buffer,
-          format: 'audio/mpeg'
-        }, [mp3Buffer.buffer]);
-        
-        // Clean up - ensure worker can be terminated
-        setTimeout(() => self.close(), 100);
-      } catch (err) {
-        console.error('Worker error:', err);
-        self.postMessage({ 
-          type: 'error', 
-          error: err.toString()
-        });
-        self.close();
-      }
-    };
-  `;
-  
-  const blob = new Blob([workerCode], { type: 'application/javascript' });
-  return URL.createObjectURL(blob);
-};
+  for (let i = 0; i < length; i++) {
+    let sample = Math.max(-1, Math.min(1, buffer[i]));
+    sample = sample < 0 ? sample * 0x8000 : sample * 0x7FFF;
+    view.setInt16(index, sample, true);
+    index += 2;
+  }
+}
 
-// Create a Web Worker for audio conversion
-export const createMp3ConversionWorker = (): Worker => {
-  const workerUrl = createMp3WorkerUrl();
-  return new Worker(workerUrl);
-};
-
-// Convert WAV buffer to MP3 using a Web Worker
-export const convertWavToMp3 = (
-  wavBuffer: ArrayBuffer, 
-  channels: number, 
-  sampleRate: number,
-  quality: number = 192
-): Promise<{ mp3Buffer: ArrayBuffer, progress: number, format?: string }> => {
+// MP3 encoding using Web Worker and lamejs
+export async function convertAudioBufferToMp3(
+  audioBuffer: AudioBuffer,
+  quality: number = 128, // Default to 128kbps for smaller file size
+  onProgress?: (percentage: number) => void
+): Promise<{ buffer: ArrayBuffer; format: string }> {
   return new Promise((resolve, reject) => {
-    console.log(`Starting audio conversion: channels=${channels}, sampleRate=${sampleRate}, wavBuffer size=${wavBuffer.byteLength}, quality=${quality}kbps`);
-    const worker = createMp3ConversionWorker();
-    let lastProgressReported = false;
-    
-    worker.onmessage = (event) => {
-      const { type, mp3Buffer, progress, format, error } = event.data;
-      
-      if (type === 'progress') {
-        console.log(`Conversion progress: ${Math.round(progress * 100)}%`);
-        
-        // If it's a progress update, we don't resolve yet but can report progress
-        // Don't resolve for progress updates as the promise can only resolve once
-        if (!lastProgressReported) {
-          resolve({ mp3Buffer: new ArrayBuffer(0), progress, format });
-          lastProgressReported = true;
-        }
-      } else if (type === 'complete') {
-        // Once complete, resolve with the final buffer
-        console.log(`Conversion complete: buffer size=${mp3Buffer.byteLength}`);
-        worker.terminate();
-        resolve({ mp3Buffer, progress: 1, format });
-      } else if (type === 'error') {
-        console.error("Worker error:", error);
-        worker.terminate();
-        reject(new Error(`Conversion failed: ${error}`));
-      }
-    };
-    
-    worker.onerror = (errorEvent) => {
-      console.error("Worker error:", errorEvent);
-      worker.terminate();
-      reject(new Error(`Conversion failed: ${errorEvent.message}`));
-    };
-    
-    // Send the WAV data to the worker for processing
     try {
-      // Make a copy of the buffer to avoid transfer issues
-      const bufferCopy = wavBuffer.slice(0);
+      log('Starting MP3 conversion process with quality ' + quality + 'kbps');
+      
+      // First convert to WAV for processing
+      const wavBuffer = convertAudioBufferToWav(audioBuffer);
+      
+      // Get the full origin URL to ensure we get the right base path
+      const baseUrl = window.location.origin;
+      
+      // Create a worker with inline code
+      const workerCode = `
+        // Import lamejs library from public path
+        try {
+          // Using full absolute URL to ensure the library is found
+          importScripts('${baseUrl}/libs/lamejs/lame.all.js');
+          console.log('Worker: lamejs library loaded successfully');
+        } catch (e) {
+          console.error('Worker: Failed to load lamejs library:', e);
+          self.postMessage({ type: 'error', error: 'Failed to load MP3 encoder library: ' + e.message });
+          return;
+        }
+
+        self.onmessage = function(e) {
+          const { wavBuffer, channels, sampleRate, quality } = e.data;
+          
+          console.log('Worker: Starting MP3 encoding with ' + quality + 'kbps quality');
+          
+          try {
+            // Create MP3 encoder
+            const mp3encoder = new lamejs.Mp3Encoder(channels, sampleRate, quality);
+            
+            // Get WAV samples as float32, we need to convert to int16
+            const wavBytes = new Uint8Array(wavBuffer);
+            
+            // Skip WAV header - find the data section
+            let dataStartIndex = 0;
+            for (let i = 0; i < wavBytes.length - 4; i++) {
+              if (wavBytes[i] === 100 && wavBytes[i+1] === 97 && wavBytes[i+2] === 116 && wavBytes[i+3] === 97) {
+                // 'data' chunk found, skip the identifier and chunk size (8 bytes)
+                dataStartIndex = i + 8;
+                break;
+              }
+            }
+            
+            // Get samples from WAV
+            const samples = new Int16Array((wavBytes.length - dataStartIndex) / 2);
+            
+            // Extract samples data
+            for (let i = 0; i < samples.length; i++) {
+              const idx = dataStartIndex + (i * 2);
+              samples[i] = (wavBytes[idx] | (wavBytes[idx + 1] << 8));
+            }
+            
+            const blockSize = 1152; // MPEG1 Layer 3 requires 1152 samples per frame
+            const mp3Data = [];
+            
+            // Get left and right channels
+            const left = new Int16Array(blockSize);
+            const right = channels > 1 ? new Int16Array(blockSize) : null;
+            
+            const totalBlocks = Math.ceil(samples.length / (channels * blockSize));
+            
+            for (let i = 0; i < totalBlocks; i++) {
+              const offset = i * channels * blockSize;
+              const remaining = Math.min(blockSize, (samples.length - offset) / channels);
+              
+              // Clear arrays
+              left.fill(0);
+              if (right) right.fill(0);
+              
+              // Extract channel data
+              for (let j = 0; j < remaining; j++) {
+                if (channels > 1) {
+                  left[j] = samples[offset + (j * 2)];
+                  right[j] = samples[offset + (j * 2) + 1];
+                } else {
+                  left[j] = samples[offset + j];
+                }
+              }
+              
+              // Encode frame
+              let mp3buf;
+              if (channels > 1) {
+                mp3buf = mp3encoder.encodeBuffer(left, right);
+              } else {
+                mp3buf = mp3encoder.encodeBuffer(left);
+              }
+              
+              if (mp3buf.length > 0) {
+                mp3Data.push(mp3buf);
+              }
+              
+              // Report progress
+              const progress = Math.min(100, Math.round((i / totalBlocks) * 100));
+              self.postMessage({ type: 'progress', progress });
+            }
+            
+            // Finalize
+            const finalMp3buf = mp3encoder.flush();
+            if (finalMp3buf.length > 0) {
+              mp3Data.push(finalMp3buf);
+            }
+            
+            // Combine all chunks
+            let totalLength = 0;
+            for (let i = 0; i < mp3Data.length; i++) {
+              totalLength += mp3Data[i].length;
+            }
+            
+            const mp3Buffer = new Uint8Array(totalLength);
+            let offset = 0;
+            for (let i = 0; i < mp3Data.length; i++) {
+              mp3Buffer.set(mp3Data[i], offset);
+              offset += mp3Data[i].length;
+            }
+            
+            console.log('Worker: MP3 encoding complete, size: ' + mp3Buffer.length + ' bytes');
+            self.postMessage({ 
+              type: 'complete', 
+              buffer: mp3Buffer.buffer,
+              size: mp3Buffer.length
+            }, [mp3Buffer.buffer]);
+          } catch (err) {
+            console.error('Worker: MP3 encoding error:', err);
+            self.postMessage({ type: 'error', error: 'MP3 encoding failed: ' + err.message });
+          }
+        };
+      `;
+      
+      // Create the worker
+      const workerBlob = new Blob([workerCode], { type: 'application/javascript' });
+      const workerUrl = URL.createObjectURL(workerBlob);
+      const worker = new Worker(workerUrl);
+      
+      // Error timeout (10 seconds)
+      const errorTimeout = setTimeout(() => {
+        worker.terminate();
+        URL.revokeObjectURL(workerUrl);
+        reject(new Error('MP3 conversion timed out after 10 seconds'));
+      }, 30000);
+      
+      // Handle worker messages
+      worker.onmessage = (e) => {
+        const { type, progress, buffer, error, size } = e.data;
+        
+        if (type === 'progress' && onProgress) {
+          onProgress(progress);
+        } else if (type === 'complete') {
+          clearTimeout(errorTimeout);
+          worker.terminate();
+          URL.revokeObjectURL(workerUrl);
+          
+          log(`MP3 conversion complete: ${size} bytes (${(size / 1024 / 1024).toFixed(2)} MB)`);
+          resolve({ 
+            buffer: buffer, 
+            format: 'audio/mpeg' 
+          });
+        } else if (type === 'error') {
+          clearTimeout(errorTimeout);
+          worker.terminate();
+          URL.revokeObjectURL(workerUrl);
+          reject(new Error(error));
+        }
+      };
+      
+      // Handle worker errors
+      worker.onerror = (err) => {
+        clearTimeout(errorTimeout);
+        worker.terminate();
+        URL.revokeObjectURL(workerUrl);
+        log(`Worker error: ${err.message}`);
+        reject(new Error(`Conversion failed: ${err.message}`));
+      };
+      
+      // Start the conversion
+      log(`Starting audio conversion: channels=${audioBuffer.numberOfChannels}, sampleRate=${audioBuffer.sampleRate}, wavBuffer size=${wavBuffer.byteLength}, quality=${quality}kbps`);
       worker.postMessage({
-        wavBuffer: bufferCopy,
-        channels: channels,
-        sampleRate: sampleRate,
-        quality: quality
-      }, [bufferCopy]);
-      console.log("WAV data sent to worker for processing");
-    } catch (postError) {
-      console.error("Error posting message to worker:", postError);
-      worker.terminate();
-      reject(new Error(`Failed to start conversion: ${postError instanceof Error ? postError.message : 'Unknown error'}`));
+        wavBuffer,
+        channels: audioBuffer.numberOfChannels,
+        sampleRate: audioBuffer.sampleRate,
+        quality
+      }, [wavBuffer]);
+      
+      log('WAV data sent to worker for processing');
+    } catch (error) {
+      log(`Error starting conversion: ${error.message}`);
+      reject(error);
     }
   });
-};
+}
+
+// Create logger function
+export function createLogger(addLog: (message: string) => void): (message: string) => void {
+  return (message: string) => {
+    console.log(message);
+    addLog(message);
+  };
+}

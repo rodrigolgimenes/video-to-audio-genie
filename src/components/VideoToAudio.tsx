@@ -15,7 +15,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 const VideoToAudio: React.FC = () => {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [fileName, setFileName] = useState('');
-  const [highQuality, setHighQuality] = useState(true);
+  const [highQuality, setHighQuality] = useState(false); // Default to lower quality for smaller files
   
   const {
     isProcessing,
@@ -48,8 +48,8 @@ const VideoToAudio: React.FC = () => {
 
   const handleExtractAudio = useCallback(() => {
     if (selectedFile) {
-      // Use higher quality settings for better audio - 256kbps for high, 192kbps for normal
-      extractAudio(selectedFile, highQuality ? 256 : 192);
+      // Use lower quality settings for smaller files - 128kbps for low, 192kbps for high
+      extractAudio(selectedFile, highQuality ? 192 : 128);
     }
   }, [selectedFile, extractAudio, highQuality]);
 
@@ -107,7 +107,7 @@ const VideoToAudio: React.FC = () => {
                   htmlFor="high-quality" 
                   className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
                 >
-                  Qualidade máxima (256kbps, arquivo maior)
+                  Qualidade melhor (192kbps, arquivo um pouco maior)
                 </label>
               </div>
               <Button 
@@ -116,7 +116,7 @@ const VideoToAudio: React.FC = () => {
                 disabled={isProcessing}
               >
                 <Volume2 className="mr-2 h-4 w-4" />
-                Extrair Áudio MP3
+                Extrair Áudio MP3 Comprimido
               </Button>
             </>
           )}
@@ -143,7 +143,7 @@ const VideoToAudio: React.FC = () => {
                   <div className="text-xs text-muted-foreground space-y-1 p-2 bg-muted/50 rounded-md">
                     <p>Formato: {audioFormat}</p>
                     <p>Tamanho: {formatFileSize(audioSize)}</p>
-                    <p>Qualidade: {highQuality ? 'Alta (256kbps)' : 'Normal (192kbps)'}</p>
+                    <p>Qualidade: {highQuality ? 'Melhor (192kbps)' : 'Comprimido (128kbps)'}</p>
                     <p>Arquivo original: {formatFileSize(selectedFile?.size)}</p>
                     <p>Redução: {selectedFile?.size && audioSize ? 
                       `${((1 - audioSize / selectedFile.size) * 100).toFixed(0)}%` : 'N/A'}</p>
