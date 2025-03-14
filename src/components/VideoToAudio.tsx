@@ -11,11 +11,13 @@ import { useAudioExtraction } from "@/hooks/useAudioExtraction";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
+import { toast } from "sonner";
 
 const VideoToAudio: React.FC = () => {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [fileName, setFileName] = useState('');
   const [browserInfo, setBrowserInfo] = useState<Record<string, any>>({});
+  const [conversionComplete, setConversionComplete] = useState(false);
   
   const {
     isProcessing,
@@ -57,21 +59,37 @@ const VideoToAudio: React.FC = () => {
     setBrowserInfo(info);
   }, []);
 
+  // Set conversion complete when audioUrl is available
+  useEffect(() => {
+    if (audioUrl) {
+      setConversionComplete(true);
+      
+      if (audioFormat === 'audio/mpeg') {
+        toast.success("Áudio MP3 extraído com sucesso!");
+      } else {
+        toast.info("Áudio WAV extraído. A codificação MP3 falhou.");
+      }
+    }
+  }, [audioUrl, audioFormat]);
+
   const handleFileChange = useCallback((file: File) => {
     if (!file) return;
     
     // Check if it's a video file
     if (!file.type.includes('video/')) {
+      toast.error("Por favor, selecione um arquivo de vídeo");
       return;
     }
     
     setSelectedFile(file);
     setFileName(file.name);
+    setConversionComplete(false);
   }, []);
 
   const handleReset = useCallback(() => {
     setSelectedFile(null);
     setFileName('');
+    setConversionComplete(false);
   }, []);
 
   const handleExtractAudio = useCallback(() => {
@@ -113,15 +131,20 @@ const VideoToAudio: React.FC = () => {
             onReset={handleReset}
           />
           
-          {isProcessing && (
+          {(isProcessing || conversionComplete) && (
             <ConversionProgress 
               progress={progress} 
               logs={logs}
-              error={error} 
+              error={error}
+              isComplete={conversionComplete}
+              audioFormat={audioFormat}
+              audioSize={audioSize}
+              originalFileSize={selectedFile?.size}
+              videoFileName={fileName}
             />
           )}
           
-          {error && !isProcessing && (
+          {error && !isProcessing && !conversionComplete && (
             <Alert variant="destructive">
               <AlertDescription>{error}</AlertDescription>
             </Alert>
@@ -151,22 +174,6 @@ const VideoToAudio: React.FC = () => {
                   format={audioFormat}
                 />
               </div>
-
-              <Collapsible className="w-full mt-4">
-                <CollapsibleTrigger className="text-xs text-muted-foreground hover:text-foreground transition-colors w-full text-center">
-                  Informações técnicas
-                </CollapsibleTrigger>
-                <CollapsibleContent className="mt-2">
-                  <div className="text-xs text-muted-foreground space-y-1 p-2 bg-muted/50 rounded-md">
-                    <p>Formato: {audioFormat}</p>
-                    <p>Tamanho: {formatFileSize(audioSize)}</p>
-                    <p>Qualidade: 64kbps (máxima compressão)</p>
-                    <p>Arquivo original: {formatFileSize(selectedFile?.size)}</p>
-                    <p>Redução: {selectedFile?.size && audioSize ? 
-                      `${((1 - audioSize / selectedFile.size) * 100).toFixed(0)}%` : 'N/A'}</p>
-                  </div>
-                </CollapsibleContent>
-              </Collapsible>
             </>
           )}
           
