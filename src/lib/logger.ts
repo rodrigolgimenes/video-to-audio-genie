@@ -2,7 +2,7 @@
 // Enhanced logger utility with detailed timestamps and categories
 
 // Log categories for better organization
-type LogCategory = 'INFO' | 'ERROR' | 'DEBUG' | 'WARN' | 'LAMEJS' | 'WORKER' | 'DATA' | 'PROCESS';
+type LogCategory = 'INFO' | 'ERROR' | 'DEBUG' | 'WARN' | 'LAMEJS' | 'WORKER' | 'DATA' | 'PROCESS' | 'FORMAT' | 'VALIDATION';
 
 export const log = (message: string, category: LogCategory = 'INFO') => {
   const timestamp = new Date().toISOString();
@@ -28,6 +28,7 @@ export const warn = (message: string) => {
   console.warn(`${timestamp} WARN: ${message}`);
 };
 
+// Specialized loggers
 export const logLameJS = (message: string) => {
   log(message, 'LAMEJS');
 };
@@ -42,4 +43,12 @@ export const logData = (message: string) => {
 
 export const logProcess = (message: string) => {
   log(message, 'PROCESS');
+};
+
+export const logFormat = (message: string) => {
+  log(message, 'FORMAT');
+};
+
+export const logValidation = (message: string) => {
+  log(message, 'VALIDATION');
 };

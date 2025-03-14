@@ -1,5 +1,5 @@
 
-import { log } from './logger';
+import { log, logLameJS, logWorker, logData, logFormat, logValidation } from './logger';
 
 // AudioBuffer to WAV converter (only as fallback if MP3 conversion fails)
 export function convertAudioBufferToWav(audioBuffer: AudioBuffer): ArrayBuffer {
@@ -7,6 +7,18 @@ export function convertAudioBufferToWav(audioBuffer: AudioBuffer): ArrayBuffer {
   const sampleRate = audioBuffer.sampleRate;
   const length = audioBuffer.length;
 
+  logFormat(`Creating WAV with ${numberOfChannels} channels, ${sampleRate}Hz, ${length} samples`);
+
+  // Validate audio data
+  if (length === 0) {
+    throw new Error("Cannot create WAV: AudioBuffer has no samples");
+  }
+
+  if (numberOfChannels <= 0) {
+    throw new Error(`Invalid number of channels: ${numberOfChannels}`);
+  }
+
+  // Create WAV buffer with proper header
   const buffer = new ArrayBuffer(44 + length * numberOfChannels * 2);
   const view = new DataView(buffer);
 
@@ -37,9 +49,34 @@ export function convertAudioBufferToWav(audioBuffer: AudioBuffer): ArrayBuffer {
   /* data chunk length */
   view.setUint32(40, length * numberOfChannels * 2, true);
 
+  logFormat(`WAV header created: RIFF/WAVE format, data size: ${length * numberOfChannels * 2} bytes`);
+
+  // Convert float audio data to PCM
   floatTo16BitPCM(view, 44, audioBuffer);
 
+  // Validate WAV header
+  const headerValidation = validateWavHeader(view);
+  if (!headerValidation.valid) {
+    logValidation(`WARNING: WAV header validation issue: ${headerValidation.message}`);
+  } else {
+    logValidation(`WAV header validation passed`);
+  }
+
   return buffer;
+}
+
+function validateWavHeader(view: DataView): { valid: boolean; message?: string } {
+  // Read the magic bytes to confirm RIFF/WAVE format
+  const riff = String.fromCharCode(view.getUint8(0), view.getUint8(1), view.getUint8(2), view.getUint8(3));
+  const wave = String.fromCharCode(view.getUint8(8), view.getUint8(9), view.getUint8(10), view.getUint8(11));
+  
+  if (riff !== 'RIFF') return { valid: false, message: `Expected 'RIFF', got '${riff}'` };
+  if (wave !== 'WAVE') return { valid: false, message: `Expected 'WAVE', got '${wave}'` };
+  
+  const audioFormat = view.getUint16(20, true);
+  if (audioFormat !== 1) return { valid: false, message: `Expected PCM format (1), got ${audioFormat}` };
+  
+  return { valid: true };
 }
 
 function writeUTFBytes(view: DataView, offset: number, string: string) {
@@ -49,16 +86,53 @@ function writeUTFBytes(view: DataView, offset: number, string: string) {
 }
 
 function floatTo16BitPCM(view: DataView, offset: number, audioBuffer: AudioBuffer) {
-  const buffer = audioBuffer.getChannelData(0);
-  const length = buffer.length;
-  let index = offset;
-
-  for (let i = 0; i < length; i++) {
-    let sample = Math.max(-1, Math.min(1, buffer[i]));
-    sample = sample < 0 ? sample * 0x8000 : sample * 0x7FFF;
-    view.setInt16(index, sample, true);
-    index += 2;
+  logData(`Converting float audio data to 16-bit PCM, channels: ${audioBuffer.numberOfChannels}`);
+  const numChannels = audioBuffer.numberOfChannels;
+  
+  // Process each channel
+  for (let c = 0; c < numChannels; c++) {
+    const channelData = audioBuffer.getChannelData(c);
+    logData(`Channel ${c} data length: ${channelData.length}, min/max check on first 100 samples`);
+    
+    // Get min/max values for debug
+    let min = 1.0, max = -1.0;
+    for (let i = 0; i < Math.min(100, channelData.length); i++) {
+      min = Math.min(min, channelData[i]);
+      max = Math.max(max, channelData[i]);
+    }
+    logData(`Channel ${c} sample range (first 100): min=${min}, max=${max}`);
   }
+
+  // Interleave channel data
+  let index = offset;
+  const length = audioBuffer.length;
+  
+  // Single or multi-channel data processing
+  if (numChannels === 1) {
+    // Mono case - simpler process
+    const buffer = audioBuffer.getChannelData(0);
+    for (let i = 0; i < length; i++) {
+      // Clamp value to [-1,1] range, then convert to 16-bit
+      let sample = Math.max(-1, Math.min(1, buffer[i]));
+      sample = sample < 0 ? sample * 0x8000 : sample * 0x7FFF; // Convert to 16-bit
+      view.setInt16(index, sample, true);
+      index += 2;
+    }
+  } else {
+    // Multi-channel - interleaved format
+    for (let i = 0; i < length; i++) {
+      for (let c = 0; c < numChannels; c++) {
+        const buffer = audioBuffer.getChannelData(c);
+        // Clamp value to [-1,1] range, then convert to 16-bit
+        let sample = Math.max(-1, Math.min(1, buffer[i]));
+        sample = sample < 0 ? sample * 0x8000 : sample * 0x7FFF; // Convert to 16-bit
+        view.setInt16(index, sample, true);
+        index += 2;
+      }
+    }
+  }
+  
+  logData(`PCM conversion complete, total bytes written: ${index - offset}`);
 }
 
 // MP3 encoding using Web Worker and lamejs
@@ -69,14 +143,23 @@ export async function convertAudioBufferToMp3(
 ): Promise<{ buffer: ArrayBuffer; format: string }> {
   return new Promise((resolve, reject) => {
     try {
-      log('Starting MP3 conversion process with quality ' + quality + 'kbps');
+      logLameJS('Starting MP3 conversion process with quality ' + quality + 'kbps');
+      
+      // Validate input
+      if (!audioBuffer || audioBuffer.length === 0) {
+        throw new Error("Invalid AudioBuffer: empty or null");
+      }
+      
+      if (audioBuffer.numberOfChannels > 2) {
+        logValidation(`WARNING: Audio has ${audioBuffer.numberOfChannels} channels, but MP3 only supports 1 or 2. Will use first two channels.`);
+      }
       
       // First convert to WAV for processing
       const wavBuffer = convertAudioBufferToWav(audioBuffer);
       
       // Get base URL for worker to properly load resources
       const baseUrl = window.location.origin;
-      log(`Base URL for resources: ${baseUrl}`);
+      logWorker(`Base URL for resources: ${baseUrl}`);
       
       // Create a worker with inline code - Fixed to avoid "Illegal return statement" error
       const workerCode = `
@@ -122,12 +205,26 @@ export async function convertAudioBufferToMp3(
             message: 'LAMEJS STRUCTURE: Available properties: ' + lameProps.join(', ')
           });
           
+          // Detailed inspection of lame object
+          self.postMessage({ 
+            type: 'log', 
+            message: 'LAMEJS VERSION: ' + (self.lamejs.version || 'unknown')
+          });
+          
           // ENHANCED LOGGING: Check if Mp3Encoder is a constructor
           if (typeof self.lamejs.Mp3Encoder === 'function') {
             self.postMessage({ 
               type: 'log', 
               message: 'LAMEJS Mp3Encoder is a function and can be instantiated with new'
             });
+            
+            // Check if it's named properly
+            if (self.lamejs.Mp3Encoder.name !== 'Mp3Encoder') {
+              self.postMessage({ 
+                type: 'log', 
+                message: 'WARNING: Mp3Encoder has unexpected name: ' + self.lamejs.Mp3Encoder.name
+              });
+            }
           } else {
             self.postMessage({ 
               type: 'log', 
@@ -142,6 +239,19 @@ export async function convertAudioBufferToMp3(
               type: 'log', 
               message: 'LAMEJS Mp3Encoder prototype methods: ' + protoProps.join(', ')
             });
+            
+            // Check specifically for encodeBuffer and flush
+            if (protoProps.includes('encodeBuffer') && protoProps.includes('flush')) {
+              self.postMessage({ 
+                type: 'log', 
+                message: 'LAMEJS Mp3Encoder has required methods: encodeBuffer and flush'
+              });
+            } else {
+              self.postMessage({ 
+                type: 'log', 
+                message: 'CRITICAL: Mp3Encoder missing required methods!'
+              });
+            }
           } catch (e) {
             self.postMessage({ 
               type: 'log', 
@@ -154,6 +264,33 @@ export async function convertAudioBufferToMp3(
             message: 'LAMEJS CHECK: Library loaded. Type: ' + typeof self.lamejs + ', Mp3Encoder: ' + typeof self.lamejs.Mp3Encoder
           });
           lameLoaded = true;
+          
+          // Try creating a test encoder instance
+          try {
+            const testEncoder = new self.lamejs.Mp3Encoder(1, 44100, 64);
+            self.postMessage({ 
+              type: 'log', 
+              message: 'Test Mp3Encoder created successfully: ' + typeof testEncoder
+            });
+            
+            // Test if we can call its methods
+            if (typeof testEncoder.encodeBuffer === 'function') {
+              self.postMessage({ 
+                type: 'log', 
+                message: 'Test Mp3Encoder.encodeBuffer is a function'
+              });
+            } else {
+              self.postMessage({ 
+                type: 'log', 
+                message: 'WARNING: Test Mp3Encoder.encodeBuffer is not a function: ' + typeof testEncoder.encodeBuffer
+              });
+            }
+          } catch (testErr) {
+            self.postMessage({ 
+              type: 'log', 
+              message: 'ERROR creating test Mp3Encoder: ' + testErr.message
+            });
+          }
         } catch (e) {
           console.error('Worker: Failed to load lamejs library:', e);
           console.error('Worker: Error details:', e.stack || 'No stack trace');
@@ -171,6 +308,19 @@ export async function convertAudioBufferToMp3(
         self.onmessage = function(e) {
           try {
             const { wavBuffer, channels, sampleRate, quality } = e.data;
+            
+            // Validate inputs
+            if (!wavBuffer || wavBuffer.byteLength === 0) {
+              throw new Error('Invalid WAV buffer: empty or null');
+            }
+            
+            if (channels !== 1 && channels !== 2) {
+              throw new Error('Invalid channels: MP3 only supports 1 or 2 channels, got ' + channels);
+            }
+            
+            if (sampleRate <= 0) {
+              throw new Error('Invalid sample rate: ' + sampleRate);
+            }
             
             console.log('Worker: Starting MP3 encoding with ' + quality + 'kbps quality');
             self.postMessage({ 
@@ -222,6 +372,7 @@ export async function convertAudioBufferToMp3(
                   type: 'log', 
                   message: 'CRITICAL ERROR: mp3encoder.encodeBuffer is not a function: ' + typeof mp3encoder.encodeBuffer
                 });
+                throw new Error('encodeBuffer is not a function on Mp3Encoder instance');
               }
               
               if (typeof mp3encoder.flush !== 'function') {
@@ -229,12 +380,14 @@ export async function convertAudioBufferToMp3(
                   type: 'log', 
                   message: 'CRITICAL ERROR: mp3encoder.flush is not a function: ' + typeof mp3encoder.flush
                 });
+                throw new Error('flush is not a function on Mp3Encoder instance');
               }
             } catch (encErr) {
               self.postMessage({ 
                 type: 'log', 
                 message: 'ERROR inspecting encoder: ' + encErr.message
               });
+              throw encErr;
             }
             
             // Get WAV samples and convert them
@@ -246,336 +399,372 @@ export async function convertAudioBufferToMp3(
             // Get WAV samples as float32, we need to convert to int16
             const wavBytes = new Uint8Array(wavBuffer);
             
-            // ENHANCED LOGGING: Log WAV header information
-            self.postMessage({ 
-              type: 'log', 
-              message: 'WAV HEADER: First 44 bytes: ' + Array.from(wavBytes.slice(0, 44)).join(',')
-            });
+            // Validate WAV format before processing
+            if (wavBytes.length < 44) {
+              throw new Error('Invalid WAV file: too small, missing header');
+            }
             
-            // Skip WAV header - find the data section
-            let dataStartIndex = 0;
-            for (let i = 0; i < wavBytes.length - 4; i++) {
-              if (wavBytes[i] === 100 && wavBytes[i+1] === 97 && wavBytes[i+2] === 116 && wavBytes[i+3] === 97) {
-                // 'data' chunk found, skip the identifier and chunk size (8 bytes)
-                dataStartIndex = i + 8;
-                console.log('Worker: Found data chunk at index', i, 'data starts at', dataStartIndex);
-                self.postMessage({ 
-                  type: 'log', 
-                  message: 'WAV FORMAT: Found data chunk at byte ' + i + ', data starts at byte ' + dataStartIndex
-                });
-                break;
+            // Parse and validate WAV header
+            function validateWavFormat() {
+              // Check RIFF header
+              const riff = String.fromCharCode(wavBytes[0], wavBytes[1], wavBytes[2], wavBytes[3]);
+              if (riff !== 'RIFF') {
+                throw new Error('Invalid WAV format: missing RIFF marker');
               }
-            }
-            
-            if (dataStartIndex === 0) {
-              throw new Error('Could not find data chunk in WAV file');
-            }
-            
-            // Get samples from WAV
-            const samples = new Int16Array((wavBytes.length - dataStartIndex) / 2);
-            
-            // ENHANCED LOGGING: Log sample range information
-            self.postMessage({ 
-              type: 'log', 
-              message: 'WAV DATA: Sample array size: ' + samples.length
-            });
-            
-            // Extract samples data
-            for (let i = 0; i < samples.length; i++) {
-              const idx = dataStartIndex + (i * 2);
-              samples[i] = (wavBytes[idx] | (wavBytes[idx + 1] << 8));
               
-              // Log some sample values for debugging (only log a few to avoid flooding)
-              if (i < 10 || i % 10000 === 0) {
+              // Check WAVE format
+              const wave = String.fromCharCode(wavBytes[8], wavBytes[9], wavBytes[10], wavBytes[11]);
+              if (wave !== 'WAVE') {
+                throw new Error('Invalid WAV format: missing WAVE marker');
+              }
+              
+              // Look for data chunk
+              let dataChunkPos = 0;
+              for (let i = 12; i < wavBytes.length - 8; i++) {
+                if (wavBytes[i] === 100 && wavBytes[i+1] === 97 && 
+                    wavBytes[i+2] === 116 && wavBytes[i+3] === 97) { // "data"
+                  dataChunkPos = i;
+                  break;
+                }
+              }
+              
+              if (dataChunkPos === 0) {
+                throw new Error('Invalid WAV format: cannot find data chunk');
+              }
+              
+              // Get data chunk size
+              const dataView = new DataView(wavBuffer);
+              const dataSize = dataView.getUint32(dataChunkPos + 4, true);
+              
+              return {
+                dataPos: dataChunkPos + 8, // Skip "data" + size
+                dataSize: dataSize,
+                format: dataView.getUint16(20, true), // Audio format (1 = PCM)
+                channels: dataView.getUint16(22, true), // Number of channels
+                sampleRate: dataView.getUint32(24, true), // Sample rate
+                bitsPerSample: dataView.getUint16(34, true) // Bits per sample
+              };
+            }
+            
+            // Validate WAV format
+            const wavFormat = validateWavFormat();
+            self.postMessage({ 
+              type: 'log', 
+              message: 'WAV FORMAT: ' + JSON.stringify(wavFormat)
+            });
+            
+            // Verify WAV format matches expected
+            if (wavFormat.format !== 1) {
+              throw new Error('Unsupported WAV format: ' + wavFormat.format + ', expected PCM (1)');
+            }
+            
+            if (wavFormat.channels !== channels) {
+              self.postMessage({ 
+                type: 'log', 
+                message: 'WARNING: WAV channels (' + wavFormat.channels + 
+                          ') doesn\'t match expected channels (' + channels + ')'
+              });
+            }
+            
+            if (wavFormat.sampleRate !== sampleRate) {
+              self.postMessage({ 
+                type: 'log', 
+                message: 'WARNING: WAV sample rate (' + wavFormat.sampleRate + 
+                          ') doesn\'t match expected sample rate (' + sampleRate + ')'
+              });
+            }
+            
+            if (wavFormat.bitsPerSample !== 16) {
+              throw new Error('Unsupported bits per sample: ' + wavFormat.bitsPerSample + ', expected 16-bit');
+            }
+            
+            const dataStartIndex = wavFormat.dataPos;
+            self.postMessage({ 
+              type: 'log', 
+              message: 'WAV FORMAT: Found data chunk at byte ' + (dataStartIndex - 8) + 
+                        ', data starts at byte ' + dataStartIndex + 
+                        ', data size: ' + wavFormat.dataSize + ' bytes'
+            });
+            
+            // Calculate how many samples we should have
+            const samplesPerChannel = Math.floor(wavFormat.dataSize / (wavFormat.channels * (wavFormat.bitsPerSample / 8)));
+            self.postMessage({ 
+              type: 'log', 
+              message: 'WAV DATA: Expecting ' + samplesPerChannel + ' samples per channel'
+            });
+            
+            // Get samples from WAV - extract 16-bit PCM data
+            // Each sample is 2 bytes (16-bit)
+            // For stereo: [LEFT_0, RIGHT_0, LEFT_1, RIGHT_1, ...]
+            // For mono: [SAMPLE_0, SAMPLE_1, SAMPLE_2, ...]
+            const bytesPerSample = wavFormat.bitsPerSample / 8;
+            const bytesPerFrame = bytesPerSample * wavFormat.channels;
+            
+            // Create arrays for each channel
+            let leftChannel = new Int16Array(samplesPerChannel);
+            let rightChannel = (channels > 1) ? new Int16Array(samplesPerChannel) : null;
+            
+            self.postMessage({ 
+              type: 'log', 
+              message: 'Extracting audio data (' + channels + ' channels, ' + 
+                        bytesPerSample + ' bytes per sample, ' + 
+                        bytesPerFrame + ' bytes per frame)'
+            });
+            
+            let errors = 0;
+            // Extract the samples - correctly handle interleaved data
+            for (let i = 0; i < samplesPerChannel; i++) {
+              // Calculate byte position for this sample frame
+              const frameStart = dataStartIndex + (i * bytesPerFrame);
+              
+              if (frameStart + bytesPerFrame > wavBytes.length) {
                 self.postMessage({ 
                   type: 'log', 
-                  message: 'SAMPLE DATA: samples[' + i + '] = ' + samples[i] + ' (from bytes at index ' + idx + ')'
+                  message: 'ERROR: Buffer overrun at sample ' + i + 
+                            ' (index ' + frameStart + ' + ' + bytesPerFrame + 
+                            ' exceeds buffer size ' + wavBytes.length + ')'
                 });
+                errors++;
+                // Break if we have too many errors
+                if (errors > 10) {
+                  throw new Error('Too many errors accessing WAV data');
+                }
+                continue;
+              }
+              
+              // Get left channel (or mono)
+              leftChannel[i] = (wavBytes[frameStart] | (wavBytes[frameStart + 1] << 8));
+              
+              // Get right channel in stereo case
+              if (channels > 1 && rightChannel) {
+                rightChannel[i] = (wavBytes[frameStart + 2] | (wavBytes[frameStart + 3] << 8));
+              }
+              
+              // Log a few samples for debugging
+              if (i === 0 || i === 100 || i === 1000 || i === 10000) {
+                if (channels > 1 && rightChannel) {
+                  self.postMessage({ 
+                    type: 'log', 
+                    message: 'SAMPLE[' + i + ']: Left=' + leftChannel[i] + 
+                              ', Right=' + rightChannel[i] + 
+                              ' (from bytes at ' + frameStart + ')'
+                  });
+                } else {
+                  self.postMessage({ 
+                    type: 'log', 
+                    message: 'SAMPLE[' + i + ']: Mono=' + leftChannel[i] + 
+                              ' (from bytes at ' + frameStart + ')'
+                  });
+                }
               }
             }
             
-            // ENHANCED LOGGING: Log samples min/max
-            let minSample = 32767;
-            let maxSample = -32768;
-            for (let i = 0; i < Math.min(1000, samples.length); i++) {
-              if (samples[i] < minSample) minSample = samples[i];
-              if (samples[i] > maxSample) maxSample = samples[i];
+            // Check value ranges
+            let minLeft = 32767, maxLeft = -32768;
+            let minRight = 32767, maxRight = -32768;
+            
+            for (let i = 0; i < Math.min(1000, samplesPerChannel); i++) {
+              minLeft = Math.min(minLeft, leftChannel[i]);
+              maxLeft = Math.max(maxLeft, leftChannel[i]);
+              
+              if (channels > 1 && rightChannel) {
+                minRight = Math.min(minRight, rightChannel[i]);
+                maxRight = Math.max(maxRight, rightChannel[i]);
+              }
             }
+            
+            // Report range stats
+            if (channels > 1 && rightChannel) {
+              self.postMessage({ 
+                type: 'log', 
+                message: 'SAMPLE RANGES (first 1000): Left min=' + minLeft + 
+                          ', max=' + maxLeft + ', Right min=' + minRight + 
+                          ', max=' + maxRight
+              });
+            } else {
+              self.postMessage({ 
+                type: 'log', 
+                message: 'SAMPLE RANGES (first 1000): Mono min=' + minLeft + 
+                          ', max=' + maxLeft
+              });
+            }
+            
+            // Now we have our channel data correctly separated
+            // Process in chunks for MP3 encoding
+            const blockSize = 1152; // MPEG1 Layer 3 samples per frame
+            const totalBlocks = Math.ceil(samplesPerChannel / blockSize);
+            
             self.postMessage({ 
               type: 'log', 
-              message: 'SAMPLE RANGE: Min=' + minSample + ', Max=' + maxSample + ' (first 1000 samples)'
+              message: 'MP3 ENCODING: Processing ' + samplesPerChannel + 
+                        ' samples in ' + totalBlocks + ' blocks of ' + blockSize
             });
             
-            console.log('Worker: Extracted', samples.length, 'samples from WAV');
-            self.postMessage({ type: 'log', message: 'Extracted ' + samples.length + ' samples from WAV' });
+            // First do a test encode to verify the encoder works
+            try {
+              // Test small sample block
+              const testLeft = new Int16Array(blockSize);
+              testLeft.fill(0);
+              
+              let testResult;
+              if (channels > 1 && rightChannel) {
+                const testRight = new Int16Array(blockSize);
+                testRight.fill(0);
+                testResult = mp3encoder.encodeBuffer(testLeft, testRight);
+              } else {
+                testResult = mp3encoder.encodeBuffer(testLeft);
+              }
+              
+              self.postMessage({ 
+                type: 'log', 
+                message: 'TEST ENCODE: Success, output size: ' + 
+                          (testResult ? testResult.length : 'unknown')
+              });
+            } catch (testErr) {
+              self.postMessage({ 
+                type: 'log', 
+                message: 'TEST ENCODE FAILED: ' + testErr.message + 
+                          '\\nStack: ' + testErr.stack
+              });
+              throw new Error('MP3 encoder test failed: ' + testErr.message);
+            }
             
-            const blockSize = 1152; // MPEG1 Layer 3 requires 1152 samples per frame
-            self.postMessage({ 
-              type: 'log', 
-              message: 'PROCESSING: Using blockSize=' + blockSize + ' for MP3 frames'
-            });
-            
+            // Encode actual data in blocks
             const mp3Data = [];
             
-            // Get left and right channels
-            const left = new Int16Array(blockSize);
-            const right = channels > 1 ? new Int16Array(blockSize) : null;
-            
-            const totalBlocks = Math.ceil(samples.length / (channels * blockSize));
-            console.log('Worker: Processing', totalBlocks, 'blocks');
-            self.postMessage({ 
-              type: 'log', 
-              message: 'PROCESSING: Total blocks to process: ' + totalBlocks
-            });
-            
-            // Before encoding, let's check if the encoder works
-            try {
-              // Test encode a very small block
-              const testLeft = new Int16Array(blockSize);
-              testLeft.fill(0); // Use zeros for test
+            for (let block = 0; block < totalBlocks; block++) {
+              // Calculate start sample for this block
+              const offset = block * blockSize;
               
-              // ENHANCED LOGGING: log test data
-              self.postMessage({ 
-                type: 'log', 
-                message: 'TEST DATA: First 5 values: ' + Array.from(testLeft.slice(0, 5)).join(',')
-              });
+              // How many samples remain to process
+              const samplesRemaining = samplesPerChannel - offset;
+              const currentBlockSize = Math.min(blockSize, samplesRemaining);
               
-              const testMp3 = mp3encoder.encodeBuffer(testLeft);
-              self.postMessage({ 
-                type: 'log', 
-                message: 'TEST ENCODE SUCCESSFUL: buffer length=' + testMp3.length
-              });
-            } catch (testError) {
-              self.postMessage({ 
-                type: 'log', 
-                message: 'TEST ENCODE FAILED: ' + testError.message + ', stack: ' + testError.stack
-              });
-              throw testError;
-            }
-            
-            for (let i = 0; i < totalBlocks; i++) {
-              // ENHANCED LOGGING: Block processing details
-              const offset = i * channels * blockSize;
-              const remaining = Math.min(blockSize, (samples.length - offset) / channels);
-              
-              if (i === 0 || i === totalBlocks - 1 || i % 50 === 0) {
+              // Log block processing (not too verbose)
+              if (block === 0 || block === totalBlocks-1 || block % 20 === 0) {
                 self.postMessage({ 
                   type: 'log', 
-                  message: 'BLOCK PROCESSING: Block ' + i + '/' + totalBlocks + 
-                            ', offset=' + offset + 
-                            ', remaining samples=' + remaining
+                  message: 'PROCESSING BLOCK ' + block + '/' + totalBlocks + 
+                            ', samples ' + offset + '-' + (offset + currentBlockSize - 1)
                 });
               }
               
-              // Clear arrays
-              left.fill(0);
-              if (right) right.fill(0);
+              // Create input buffers for this block
+              const blockLeft = new Int16Array(blockSize);
+              const blockRight = (channels > 1) ? new Int16Array(blockSize) : null;
               
-              // Extract channel data
-              for (let j = 0; j < remaining; j++) {
-                if (channels > 1) {
-                  // Stereo
-                  if (offset + (j * 2) < samples.length) {
-                    left[j] = samples[offset + (j * 2)];
-                    
-                    // ENHANCED LOGGING: Check index bounds for right channel
-                    if (offset + (j * 2) + 1 >= samples.length) {
-                      self.postMessage({ 
-                        type: 'log', 
-                        message: 'INDEX ERROR: Right channel index out of bounds: offset=' + offset + 
-                                  ', j=' + j + 
-                                  ', trying to access index ' + (offset + (j * 2) + 1) + 
-                                  ' in array of length ' + samples.length
-                      });
-                      // Fix: use zero instead of accessing out of bounds
-                      right[j] = 0;
-                    } else {
-                      right[j] = samples[offset + (j * 2) + 1];
-                    }
-                  } else {
-                    // Out of bounds for left channel
-                    self.postMessage({ 
-                      type: 'log', 
-                      message: 'INDEX ERROR: Left channel index out of bounds: offset=' + offset + 
-                                ', j=' + j + 
-                                ', trying to access index ' + (offset + (j * 2)) + 
-                                ' in array of length ' + samples.length
-                    });
-                    // Fix: use zeros instead of accessing out of bounds
-                    left[j] = 0;
-                    right[j] = 0;
-                  }
-                } else {
-                  // Mono
-                  if (offset + j < samples.length) {
-                    left[j] = samples[offset + j];
-                  } else {
-                    // Out of bounds
-                    self.postMessage({ 
-                      type: 'log', 
-                      message: 'INDEX ERROR: Mono channel index out of bounds: offset=' + offset + 
-                                ', j=' + j + 
-                                ', trying to access index ' + (offset + j) + 
-                                ' in array of length ' + samples.length
-                    });
-                    // Fix: use zero instead of accessing out of bounds
-                    left[j] = 0;
-                  }
+              // Fill with zeros (important for partial blocks)
+              blockLeft.fill(0);
+              if (blockRight) blockRight.fill(0);
+              
+              // Copy actual data for this block
+              for (let i = 0; i < currentBlockSize; i++) {
+                if (offset + i < leftChannel.length) {
+                  blockLeft[i] = leftChannel[offset + i];
                 }
                 
-                // Log a few sample values for the first block
-                if (i === 0 && j < 5) {
-                  if (channels > 1) {
-                    self.postMessage({ 
-                      type: 'log', 
-                      message: 'CHANNEL DATA: Block 0, Sample ' + j + 
-                                ', left=' + left[j] + 
-                                ', right=' + right[j]
-                    });
-                  } else {
-                    self.postMessage({ 
-                      type: 'log', 
-                      message: 'CHANNEL DATA: Block 0, Sample ' + j + 
-                                ', mono=' + left[j]
-                    });
-                  }
+                if (channels > 1 && blockRight && offset + i < rightChannel.length) {
+                  blockRight[i] = rightChannel[offset + i];
                 }
               }
               
-              // ENHANCED LOGGING: Check audio data range for this block
-              if (i === 0 || i % 50 === 0) {
-                let blockMinLeft = 32767;
-                let blockMaxLeft = -32768;
-                let blockMinRight = channels > 1 ? 32767 : 0;
-                let blockMaxRight = channels > 1 ? -32768 : 0;
-                
-                for (let j = 0; j < remaining; j++) {
-                  if (left[j] < blockMinLeft) blockMinLeft = left[j];
-                  if (left[j] > blockMaxLeft) blockMaxLeft = left[j];
-                  if (channels > 1) {
-                    if (right[j] < blockMinRight) blockMinRight = right[j];
-                    if (right[j] > blockMaxRight) blockMaxRight = right[j];
-                  }
-                }
-                
-                if (channels > 1) {
-                  self.postMessage({ 
-                    type: 'log', 
-                    message: 'BLOCK DATA RANGE: Block ' + i + 
-                              ', Left min=' + blockMinLeft + 
-                              ', max=' + blockMaxLeft + 
-                              ', Right min=' + blockMinRight + 
-                              ', max=' + blockMaxRight + 
-                              ', remaining=' + remaining
-                  });
-                } else {
-                  self.postMessage({ 
-                    type: 'log', 
-                    message: 'BLOCK DATA RANGE: Block ' + i + 
-                              ', Mono min=' + blockMinLeft + 
-                              ', max=' + blockMaxLeft + 
-                              ', remaining=' + remaining
-                  });
-                }
-              }
-              
-              // Encode frame with try/catch to get detailed error logging
+              // Encode with proper error handling
               try {
-                let mp3buf;
-                if (channels > 1) {
-                  mp3buf = mp3encoder.encodeBuffer(left, right);
+                let mp3Buffer;
+                if (channels > 1 && blockRight) {
+                  mp3Buffer = mp3encoder.encodeBuffer(blockLeft, blockRight);
                 } else {
-                  mp3buf = mp3encoder.encodeBuffer(left);
+                  mp3Buffer = mp3encoder.encodeBuffer(blockLeft);
                 }
                 
-                if (mp3buf && mp3buf.length > 0) {
-                  mp3Data.push(mp3buf);
-                  if (i === 0) {
+                if (mp3Buffer && mp3Buffer.length > 0) {
+                  mp3Data.push(mp3Buffer);
+                  
+                  // Log first block success for debugging
+                  if (block === 0) {
                     self.postMessage({ 
                       type: 'log', 
-                      message: 'First encode block successful: ' + mp3buf.length + ' bytes'
+                      message: 'First MP3 block encoded: ' + mp3Buffer.length + ' bytes'
                     });
                   }
-                } else if (i === 0) {
+                } else if (block === 0) {
+                  // Something's wrong if first block gave empty result
                   self.postMessage({ 
                     type: 'log', 
-                    message: 'WARNING: First encode block returned empty buffer'
+                    message: 'WARNING: First MP3 block returned empty buffer'
                   });
                 }
-              } catch (encodeError) {
-                // Detailed encode error logging
+              } catch (encodeErr) {
                 self.postMessage({ 
                   type: 'log', 
-                  message: 'ENCODE ERROR in block ' + i + ': ' + encodeError.message + 
-                            '\\nStack: ' + encodeError.stack + 
-                            '\\nLeft buffer first 5 values: ' + Array.from(left.slice(0, 5)).join(',') + 
-                            (channels > 1 ? '\\nRight buffer first 5 values: ' + Array.from(right.slice(0, 5)).join(',') : '')
+                  message: 'ENCODE ERROR in block ' + block + ': ' + encodeErr.message + 
+                            '\\nStack: ' + encodeErr.stack
                 });
-                throw encodeError;
+                throw encodeErr;
               }
               
               // Report progress
-              if (i % 10 === 0 || i === totalBlocks - 1) {
-                const progress = Math.min(100, Math.round((i / totalBlocks) * 100));
+              if (block % 10 === 0 || block === totalBlocks - 1) {
+                const progress = Math.min(100, Math.round((block / totalBlocks) * 100));
                 self.postMessage({ type: 'progress', progress });
               }
             }
             
-            // Finalize
-            console.log('Worker: Finalizing MP3 encoding');
-            self.postMessage({ type: 'log', message: 'Finalizing MP3 encoding with flush()' });
+            // Finalize MP3 encoding
+            self.postMessage({ 
+              type: 'log', 
+              message: 'MP3 blocks processed, finalizing with flush()'
+            });
             
-            // Call flush() with try/catch for detailed error logging
-            let finalMp3buf;
             try {
-              finalMp3buf = mp3encoder.flush();
+              const flushBuffer = mp3encoder.flush();
               
-              if (finalMp3buf && finalMp3buf.length > 0) {
-                mp3Data.push(finalMp3buf);
+              if (flushBuffer && flushBuffer.length > 0) {
+                mp3Data.push(flushBuffer);
                 self.postMessage({ 
                   type: 'log', 
-                  message: 'Flush successful: ' + finalMp3buf.length + ' bytes'
+                  message: 'MP3 flush successful: ' + flushBuffer.length + ' bytes'
                 });
               } else {
                 self.postMessage({ 
                   type: 'log', 
-                  message: 'WARNING: Flush returned empty buffer'
+                  message: 'MP3 flush returned empty buffer'
                 });
               }
-            } catch (flushError) {
+            } catch (flushErr) {
               self.postMessage({ 
                 type: 'log', 
-                message: 'FLUSH ERROR: ' + flushError.message + '\\nStack: ' + flushError.stack
+                message: 'FLUSH ERROR: ' + flushErr.message + 
+                          '\\nStack: ' + flushErr.stack
               });
-              throw flushError;
+              throw flushErr;
             }
             
-            // Combine all chunks
+            // Combine all MP3 chunks
             let totalLength = 0;
             for (let i = 0; i < mp3Data.length; i++) {
               totalLength += mp3Data[i].length;
             }
             
             if (totalLength === 0) {
-              self.postMessage({ 
-                type: 'log', 
-                message: 'ERROR: No MP3 data generated (totalLength=0)'
-              });
               throw new Error('No MP3 data generated (buffer length is 0)');
             }
             
-            const mp3Buffer = new Uint8Array(totalLength);
-            let offset = 0;
-            for (let i = 0; i < mp3Data.length; i++) {
-              mp3Buffer.set(mp3Data[i], offset);
-              offset += mp3Data[i].length;
-            }
-            
-            console.log('Worker: MP3 encoding complete, size: ' + mp3Buffer.length + ' bytes');
             self.postMessage({ 
               type: 'log', 
-              message: 'MP3 encoding complete: ' + mp3Buffer.length + ' bytes'
+              message: 'MP3 encoding complete: ' + totalLength + ' bytes in ' + 
+                        mp3Data.length + ' chunks'
             });
+            
+            // Create final buffer and copy data
+            const mp3Buffer = new Uint8Array(totalLength);
+            let position = 0;
+            for (let i = 0; i < mp3Data.length; i++) {
+              mp3Buffer.set(mp3Data[i], position);
+              position += mp3Data[i].length;
+            }
+            
+            // Send back the result
             self.postMessage({ 
               type: 'complete', 
               buffer: mp3Buffer.buffer,
@@ -651,7 +840,7 @@ export async function convertAudioBufferToMp3(
       log(`Starting audio conversion: channels=${audioBuffer.numberOfChannels}, sampleRate=${audioBuffer.sampleRate}, wavBuffer size=${wavBuffer.byteLength}, quality=${quality}kbps`);
       worker.postMessage({
         wavBuffer,
-        channels: audioBuffer.numberOfChannels,
+        channels: Math.min(2, audioBuffer.numberOfChannels), // MP3 only supports up to 2 channels
         sampleRate: audioBuffer.sampleRate,
         quality
       }, [wavBuffer]);
