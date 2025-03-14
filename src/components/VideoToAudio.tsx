@@ -16,7 +16,8 @@ const VideoToAudio: React.FC = () => {
   const {
     isProcessing,
     progress,
-    mp3Url,
+    audioUrl,
+    audioFormat,
     error,
     logs,
     extractAudio,
@@ -52,7 +53,7 @@ const VideoToAudio: React.FC = () => {
         <CardHeader>
           <CardTitle className="text-2xl font-bold text-center">Video to Audio Converter</CardTitle>
           <CardDescription className="text-center">
-            Extract audio from your videos and download as MP3
+            Extract audio from your videos and download as {audioFormat === 'audio/wav' ? 'WAV' : 'MP3'}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
@@ -74,7 +75,7 @@ const VideoToAudio: React.FC = () => {
             </Alert>
           )}
           
-          {!isProcessing && !mp3Url && selectedFile && (
+          {!isProcessing && !audioUrl && selectedFile && (
             <Button 
               className="w-full" 
               onClick={handleExtractAudio}
@@ -85,9 +86,9 @@ const VideoToAudio: React.FC = () => {
             </Button>
           )}
           
-          {mp3Url && (
+          {audioUrl && (
             <DownloadButton 
-              url={mp3Url} 
+              url={audioUrl} 
               fileName={getOutputFileName(fileName || 'audio.mp3')} 
             />
           )}

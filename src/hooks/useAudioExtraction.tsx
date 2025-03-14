@@ -11,7 +11,8 @@ import { useToast } from "@/hooks/use-toast";
 export const useAudioExtraction = () => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState(0);
-  const [mp3Url, setMp3Url] = useState<string | null>(null);
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [audioFormat, setAudioFormat] = useState<string>('audio/mpeg');
   const [error, setError] = useState<string | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
   const { toast } = useToast();
@@ -29,7 +30,7 @@ export const useAudioExtraction = () => {
       setProgress(0);
       setError(null);
       setLogs([]);
-      setMp3Url(null);
+      setAudioUrl(null);
       
       // Step 1: Read the video file as ArrayBuffer
       addLog("Starting to read video file as ArrayBuffer");
@@ -53,12 +54,13 @@ export const useAudioExtraction = () => {
         // Step 4: Process the audio data
         addLog("Starting MP3 conversion with Web Worker");
         let finalBuffer: ArrayBuffer | null = null;
+        let format = 'audio/mpeg';
         
         try {
           let lastProgress = 0;
           
           while (finalBuffer === null) {
-            const { mp3Buffer, progress } = await convertWavToMp3(
+            const { mp3Buffer, progress, format: workerFormat } = await convertWavToMp3(
               wavBuffer.slice(0), // Create a copy since the worker consumes the original
               audioBuffer.numberOfChannels,
               audioBuffer.sampleRate
@@ -74,18 +76,22 @@ export const useAudioExtraction = () => {
             
             if (progress === 1) {
               finalBuffer = mp3Buffer;
-              addLog(`Processing complete (${finalBuffer.byteLength} bytes)`);
+              if (workerFormat) {
+                format = workerFormat;
+              }
+              addLog(`Processing complete (${finalBuffer.byteLength} bytes) as ${format}`);
             }
           }
           
           // Step 5: Create a Blob from the processed buffer
           addLog("Creating audio Blob");
-          const audioBlob = new Blob([finalBuffer], { type: 'audio/mpeg' });
+          const audioBlob = new Blob([finalBuffer], { type: format });
+          setAudioFormat(format);
           
           // Step 6: Create a download URL
           addLog("Generating download URL");
           const url = URL.createObjectURL(audioBlob);
-          setMp3Url(url);
+          setAudioUrl(url);
           
           toast({
             title: "Conversion complete!",
@@ -117,13 +123,15 @@ export const useAudioExtraction = () => {
   }, [addLog, toast]);
 
   const getOutputFileName = useCallback((fileName: string) => {
-    return fileName.replace(/\.[^/.]+$/, '.mp3');
-  }, []);
+    const extension = audioFormat === 'audio/wav' ? '.wav' : '.mp3';
+    return fileName.replace(/\.[^/.]+$/, extension);
+  }, [audioFormat]);
 
   return {
     isProcessing,
     progress,
-    mp3Url,
+    audioUrl,
+    audioFormat,
     error,
     logs,
     extractAudio,
