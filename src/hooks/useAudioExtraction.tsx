@@ -53,54 +53,112 @@ export const useAudioExtraction = () => {
         
         // Step 4: Process the audio data
         addLog("Starting MP3 conversion with Web Worker");
-        let finalBuffer: ArrayBuffer | null = null;
-        let format = 'audio/mpeg';
         
-        try {
-          let lastProgress = 0;
+        let conversionAttempts = 0;
+        const maxAttempts = 3;
+        let finalBuffer: ArrayBuffer | null = null;
+        let format = 'audio/wav'; // Default to WAV
+        
+        while (finalBuffer === null && conversionAttempts < maxAttempts) {
+          conversionAttempts++;
           
-          while (finalBuffer === null) {
-            const { mp3Buffer, progress, format: workerFormat } = await convertWavToMp3(
+          try {
+            // Track progress updates
+            let lastProgress = 0;
+            let conversionComplete = false;
+            
+            // Start the conversion process
+            const processingPromise = convertWavToMp3(
               wavBuffer.slice(0), // Create a copy since the worker consumes the original
               audioBuffer.numberOfChannels,
               audioBuffer.sampleRate
             );
             
-            // Only add a log if progress changed significantly
-            if (progress - lastProgress >= 0.1) {
-              lastProgress = progress;
-              addLog(`Processing progress: ${Math.round(progress * 100)}%`);
+            // Since we need to handle multiple progress updates, we'll use
+            // the promise differently
+            processingPromise.then(
+              ({ mp3Buffer, progress, format: workerFormat }) => {
+                // Update progress state
+                if (progress > lastProgress) {
+                  lastProgress = progress;
+                  setProgress(progress * 100);
+                  
+                  // Only log significant progress changes
+                  if (Math.floor(progress * 10) > Math.floor(lastProgress * 10)) {
+                    addLog(`Processing progress: ${Math.round(progress * 100)}%`);
+                  }
+                }
+                
+                // If conversion is complete (progress === 1)
+                if (progress === 1 && !conversionComplete) {
+                  conversionComplete = true;
+                  finalBuffer = mp3Buffer;
+                  
+                  if (workerFormat) {
+                    format = workerFormat;
+                  }
+                  
+                  addLog(`Processing complete (${finalBuffer.byteLength} bytes) as ${format}`);
+                  
+                  // Create the audio blob and URL
+                  const audioBlob = new Blob([finalBuffer], { type: format });
+                  setAudioFormat(format);
+                  const url = URL.createObjectURL(audioBlob);
+                  setAudioUrl(url);
+                  
+                  toast({
+                    title: "Conversion complete!",
+                    description: "Your audio file is ready for download."
+                  });
+                  
+                  addLog("Conversion process completed successfully");
+                  setIsProcessing(false);
+                }
+              },
+              (error) => {
+                throw error;
+              }
+            );
+            
+            // Wait up to 10 seconds for conversion to complete
+            let timeWaited = 0;
+            while (finalBuffer === null && timeWaited < 10000 && !conversionComplete) {
+              await new Promise(r => setTimeout(r, 500));
+              timeWaited += 500;
             }
             
-            setProgress(progress * 100);
-            
-            if (progress === 1) {
-              finalBuffer = mp3Buffer;
-              if (workerFormat) {
-                format = workerFormat;
+            // If conversion is taking too long, we'll try again or fall back to WAV
+            if (finalBuffer === null && !conversionComplete) {
+              if (conversionAttempts >= maxAttempts) {
+                // Fall back to WAV if MP3 conversion failed
+                addLog("MP3 conversion timed out, falling back to WAV format");
+                finalBuffer = wavBuffer.slice(0);
+                format = 'audio/wav';
+                
+                // Create a WAV blob and URL
+                const audioBlob = new Blob([finalBuffer], { type: format });
+                setAudioFormat(format);
+                const url = URL.createObjectURL(audioBlob);
+                setAudioUrl(url);
+                
+                toast({
+                  title: "Conversion complete!",
+                  description: "Your audio file is ready for download (WAV format)."
+                });
+                
+                addLog("Conversion process completed with WAV fallback");
+              } else {
+                addLog(`Conversion attempt ${conversionAttempts} timed out, retrying...`);
               }
-              addLog(`Processing complete (${finalBuffer.byteLength} bytes) as ${format}`);
+            }
+          } catch (conversionError) {
+            addLog(`Error in audio processing: ${conversionError instanceof Error ? conversionError.message : 'Unknown error'}`);
+            if (conversionAttempts >= maxAttempts) {
+              throw conversionError;
+            } else {
+              addLog(`Retrying conversion (attempt ${conversionAttempts + 1})`);
             }
           }
-          
-          // Step 5: Create a Blob from the processed buffer
-          addLog("Creating audio Blob");
-          const audioBlob = new Blob([finalBuffer], { type: format });
-          setAudioFormat(format);
-          
-          // Step 6: Create a download URL
-          addLog("Generating download URL");
-          const url = URL.createObjectURL(audioBlob);
-          setAudioUrl(url);
-          
-          toast({
-            title: "Conversion complete!",
-            description: "Your audio file is ready for download."
-          });
-          addLog("Conversion process completed successfully");
-        } catch (conversionError) {
-          addLog(`Error in audio processing: ${conversionError instanceof Error ? conversionError.message : 'Unknown error'}`);
-          throw conversionError;
         }
       } catch (decodeError) {
         addLog(`Error decoding audio: ${decodeError instanceof Error ? decodeError.message : 'Unknown error'}`);

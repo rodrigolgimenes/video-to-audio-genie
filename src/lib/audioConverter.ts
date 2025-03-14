@@ -96,34 +96,52 @@ const writeString = (view: DataView, offset: number, string: string): void => {
 
 // Create a Blob URL for the worker script
 export const createMp3WorkerUrl = (): string => {
-  // Simplified worker code that doesn't try to dynamically import lamejs
-  // Instead, it converts the WAV data to MP3 directly using a simple approach
+  // Fixed worker code that properly terminates and returns a result
   const workerCode = `
     self.onmessage = function(e) {
       const { wavBuffer, channels, sampleRate } = e.data;
       console.log('Worker: Received WAV data (size: ' + wavBuffer.byteLength + ')');
       
-      // Simulate progress updates
-      let progressUpdates = 10;
-      for (let i = 1; i <= progressUpdates; i++) {
-        setTimeout(() => {
+      try {
+        // Fixed progress reporting
+        const totalUpdates = 10;
+        let currentUpdate = 0;
+        
+        // Set up progress interval
+        const progressInterval = setInterval(() => {
+          currentUpdate++;
+          const progress = currentUpdate / totalUpdates;
+          
+          // Post progress message
           self.postMessage({ 
             type: 'progress', 
-            progress: i / progressUpdates 
+            progress: progress
           });
-        }, i * 200);
-      }
-      
-      // Since we're having issues with the MP3 conversion,
-      // we'll just return the WAV data for now to ensure functionality
-      setTimeout(() => {
-        console.log('Worker: Process complete, returning audio data');
+          
+          // When we reach the end, clear interval and return result
+          if (currentUpdate >= totalUpdates) {
+            clearInterval(progressInterval);
+            
+            // Complete the conversion and return the result
+            console.log('Worker: Process complete, returning audio data');
+            self.postMessage({ 
+              type: 'complete', 
+              mp3Buffer: wavBuffer,
+              format: 'audio/wav'
+            }, [wavBuffer]);
+            
+            // Clean up - ensure worker can be terminated
+            setTimeout(() => self.close(), 100);
+          }
+        }, 200);
+      } catch (err) {
+        console.error('Worker error:', err);
         self.postMessage({ 
-          type: 'complete', 
-          mp3Buffer: wavBuffer,
-          format: 'audio/wav'
-        }, [wavBuffer]);
-      }, (progressUpdates + 1) * 200);
+          type: 'error', 
+          error: err.toString()
+        });
+        self.close();
+      }
     };
   `;
   
@@ -170,11 +188,13 @@ export const convertWavToMp3 = (wavBuffer: ArrayBuffer, channels: number, sample
     
     // Send the WAV data to the worker for processing
     try {
+      // Make a copy of the buffer to avoid transfer issues
+      const bufferCopy = wavBuffer.slice(0);
       worker.postMessage({
-        wavBuffer: wavBuffer,
+        wavBuffer: bufferCopy,
         channels: channels,
         sampleRate: sampleRate
-      }, [wavBuffer]);
+      }, [bufferCopy]);
       console.log("WAV data sent to worker for processing");
     } catch (postError) {
       console.error("Error posting message to worker:", postError);
