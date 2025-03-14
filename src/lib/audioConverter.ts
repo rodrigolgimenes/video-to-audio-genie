@@ -1,3 +1,4 @@
+
 // Function to read a file as an ArrayBuffer
 export const readFileAsArrayBuffer = (file: File): Promise<ArrayBuffer> => {
   return new Promise((resolve, reject) => {
@@ -100,6 +101,8 @@ export const createMp3ConversionWorker = (): Worker => {
 
     onmessage = function(e) {
       const { wavBuffer, channels, sampleRate } = e.data;
+      console.log('Worker: Received WAV data (size: ' + wavBuffer.byteLength + ')');
+      
       const mp3encoder = new lamejs.Mp3Encoder(channels, sampleRate, 128);
       
       // Convert the WAV buffer to Int16Array for processing
@@ -155,6 +158,8 @@ export const createMp3ConversionWorker = (): Worker => {
         result.set(arr, offset);
         offset += arr.length;
       });
+      
+      console.log('Worker: MP3 conversion complete (buffer size: ' + result.byteLength + ')');
       
       // Send the complete MP3 data back to the main thread
       self.postMessage({ 
