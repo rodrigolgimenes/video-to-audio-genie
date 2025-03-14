@@ -98,8 +98,8 @@ const writeString = (view: DataView, offset: number, string: string): void => {
 export const createMp3WorkerUrl = (): string => {
   // Updated worker code that uses lamejs to properly convert WAV to MP3
   const workerCode = `
-    // Import lamejs library
-    importScripts('https://cdn.jsdelivr.net/npm/lamejs@1.2.1/lame.min.js');
+    // Import lamejs library from public path
+    importScripts('/libs/lamejs/lame.all.js');
 
     self.onmessage = function(e) {
       const { wavBuffer, channels, sampleRate } = e.data;
