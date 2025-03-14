@@ -10,12 +10,10 @@ import DownloadButton from "@/components/audio-extractor/DownloadButton";
 import { useAudioExtraction } from "@/hooks/useAudioExtraction";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Badge } from "@/components/ui/badge";
-import { Checkbox } from "@/components/ui/checkbox";
 
 const VideoToAudio: React.FC = () => {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [fileName, setFileName] = useState('');
-  const [highQuality, setHighQuality] = useState(false); // Default to lower quality for smaller files
   
   const {
     isProcessing,
@@ -48,14 +46,14 @@ const VideoToAudio: React.FC = () => {
 
   const handleExtractAudio = useCallback(() => {
     if (selectedFile) {
-      // Use lower quality settings for smaller files - 128kbps for low, 192kbps for high
-      extractAudio(selectedFile, highQuality ? 192 : 128);
+      // Always use 128kbps for smallest file size
+      extractAudio(selectedFile, 128);
     }
-  }, [selectedFile, extractAudio, highQuality]);
+  }, [selectedFile, extractAudio]);
 
   // Format output size based on the file extension
   const getFormatLabel = () => {
-    return audioFormat === 'audio/wav' ? 'WAV (não comprimido)' : 'MP3 (comprimido)';
+    return audioFormat === 'audio/wav' ? 'WAV (não comprimido)' : 'MP3 (máxima compressão)';
   };
 
   // Format file size to a readable format
@@ -96,29 +94,14 @@ const VideoToAudio: React.FC = () => {
           )}
           
           {!isProcessing && !audioUrl && selectedFile && (
-            <>
-              <div className="flex items-center space-x-2 mb-2">
-                <Checkbox 
-                  id="high-quality" 
-                  checked={highQuality} 
-                  onCheckedChange={(checked) => setHighQuality(checked as boolean)}
-                />
-                <label 
-                  htmlFor="high-quality" 
-                  className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
-                >
-                  Qualidade melhor (192kbps, arquivo um pouco maior)
-                </label>
-              </div>
-              <Button 
-                className="w-full" 
-                onClick={handleExtractAudio}
-                disabled={isProcessing}
-              >
-                <Volume2 className="mr-2 h-4 w-4" />
-                Extrair Áudio MP3 com Máxima Compressão
-              </Button>
-            </>
+            <Button 
+              className="w-full" 
+              onClick={handleExtractAudio}
+              disabled={isProcessing}
+            >
+              <Volume2 className="mr-2 h-4 w-4" />
+              Extrair Áudio MP3 com Máxima Compressão
+            </Button>
           )}
           
           {audioUrl && (
@@ -143,7 +126,7 @@ const VideoToAudio: React.FC = () => {
                   <div className="text-xs text-muted-foreground space-y-1 p-2 bg-muted/50 rounded-md">
                     <p>Formato: {audioFormat}</p>
                     <p>Tamanho: {formatFileSize(audioSize)}</p>
-                    <p>Qualidade: {highQuality ? '192kbps' : '128kbps (mais comprimido)'}</p>
+                    <p>Qualidade: 128kbps (máxima compressão)</p>
                     <p>Arquivo original: {formatFileSize(selectedFile?.size)}</p>
                     <p>Redução: {selectedFile?.size && audioSize ? 
                       `${((1 - audioSize / selectedFile.size) * 100).toFixed(0)}%` : 'N/A'}</p>

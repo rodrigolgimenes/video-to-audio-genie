@@ -104,7 +104,6 @@ export async function convertAudioBufferToMp3(
             error: 'Failed to load MP3 encoder library: ' + e.message,
             details: e.stack || 'No stack trace'
           });
-          return;
         }
 
         self.onmessage = function(e) {

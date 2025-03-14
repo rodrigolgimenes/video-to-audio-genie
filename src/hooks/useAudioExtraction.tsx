@@ -54,7 +54,7 @@ export function useAudioExtraction() {
         logger(`Audio successfully decoded: ${audioBuffer.numberOfChannels} channels, ${audioBuffer.sampleRate}Hz, ${audioBuffer.length} samples`);
         
         // Step 4: Try to convert to MP3 first
-        logger(`Checking if lame.all.js is accessible...`);
+        logger('Checking if lame.all.js is accessible...');
         try {
           // Try to verify if the lame.all.js file is accessible
           const testResponse = await fetch('/libs/lamejs/lame.all.js', { method: 'HEAD' });
@@ -68,7 +68,7 @@ export function useAudioExtraction() {
         }
         
         try {
-          logger(`Starting MP3 conversion (quality: ${quality}kbps)`);
+          logger(`Starting MP3 conversion with maximum compression (quality: ${quality}kbps)`);
           const { buffer: mp3Buffer, format } = await convertAudioBufferToMp3(
             audioBuffer,
             quality,
@@ -83,7 +83,7 @@ export function useAudioExtraction() {
           setAudioFormat(format);
           setAudioSize(blob.size);
           setProgress(100);
-          logger(`MP3 conversion successful: ${blob.size} bytes`);
+          logger(`MP3 conversion successful: ${blob.size} bytes (${(blob.size / 1024 / 1024).toFixed(2)} MB)`);
           
         } catch (mp3Error) {
           addErrorLog(`MP3 conversion failed: ${mp3Error.message}`);
@@ -100,7 +100,7 @@ export function useAudioExtraction() {
           setAudioFormat('audio/wav');
           setAudioSize(blob.size);
           setProgress(100);
-          logger(`WAV fallback successful: ${blob.size} bytes`);
+          logger(`WAV fallback successful: ${blob.size} bytes (${(blob.size / 1024 / 1024).toFixed(2)} MB)`);
         }
         
       } catch (decodeError) {
