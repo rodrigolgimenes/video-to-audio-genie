@@ -51,7 +51,7 @@ export const useAudioExtraction = () => {
         addLog(`WAV conversion complete (${wavBuffer.byteLength} bytes)`);
         
         // Step 4: Process the audio data
-        addLog("Starting audio processing with Web Worker");
+        addLog("Starting MP3 conversion with Web Worker");
         let finalBuffer: ArrayBuffer | null = null;
         
         try {
@@ -80,9 +80,7 @@ export const useAudioExtraction = () => {
           
           // Step 5: Create a Blob from the processed buffer
           addLog("Creating audio Blob");
-          // We're using audio/wav since we're essentially returning WAV data in the fallback mode
-          // In a production app with proper MP3 encoding, you'd use audio/mpeg
-          const audioBlob = new Blob([finalBuffer], { type: 'audio/wav' });
+          const audioBlob = new Blob([finalBuffer], { type: 'audio/mpeg' });
           
           // Step 6: Create a download URL
           addLog("Generating download URL");
@@ -119,8 +117,7 @@ export const useAudioExtraction = () => {
   }, [addLog, toast]);
 
   const getOutputFileName = useCallback((fileName: string) => {
-    // We're now returning WAV in the fallback implementation
-    return fileName.replace(/\.[^/.]+$/, '.wav');
+    return fileName.replace(/\.[^/.]+$/, '.mp3');
   }, []);
 
   return {

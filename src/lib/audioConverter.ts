@@ -1,4 +1,3 @@
-
 // Function to read a file as an ArrayBuffer
 export const readFileAsArrayBuffer = (file: File): Promise<ArrayBuffer> => {
   return new Promise((resolve, reject) => {
@@ -94,27 +93,38 @@ const writeString = (view: DataView, offset: number, string: string): void => {
   }
 };
 
-// Create a Blob URL for the worker script
+// Create a Blob URL for the worker script with proper lamejs import
 export const createMp3WorkerUrl = (): string => {
-  // This is a simplified version of the mp3 encoder that works within the worker
+  // Updated worker code to use the locally installed lamejs
   const workerCode = `
-    // Simple MP3 encoder implementation using a fallback approach
-    // since we can't rely on external scripts in the Worker
+    // Use dynamic import for lamejs - this works in modern browsers
+    // and allows us to use the locally installed npm package
+    self.lamejs = null;
     
-    self.onmessage = function(e) {
+    // Function to load lamejs module
+    async function loadLameModule() {
+      try {
+        // This works with Vite - dynamically imports the ESM module
+        const lameModule = await import('/node_modules/lamejs/lame.all.js');
+        self.lamejs = lameModule.default || lameModule;
+        console.log('Worker: lamejs loaded successfully');
+        return true;
+      } catch (err) {
+        console.error('Worker: Failed to load lamejs:', err);
+        return false;
+      }
+    }
+    
+    self.onmessage = async function(e) {
       const { wavBuffer, channels, sampleRate } = e.data;
       console.log('Worker: Received WAV data (size: ' + wavBuffer.byteLength + ')');
       
-      try {
-        // Since we can't use lamejs directly (import issues), we'll use a simple conversion method
-        // This is a basic approach that avoids the external dependency
-        
-        // Create a simpler AudioContext-based approach
-        // Return the WAV data as MP3 for now (we'll implement a proper encoder when possible)
-        // At least this allows the application to continue functioning
-        
-        // Convert WAV Int16Array to basic MP3 format (without actual encoding)
-        const wavData = new Int16Array(wavBuffer);
+      // First load the lamejs module
+      const lameLoaded = await loadLameModule();
+      
+      if (!lameLoaded) {
+        // If lamejs couldn't be loaded, use fallback approach (return WAV instead)
+        console.log('Worker: Using fallback approach - returning WAV data as MP3');
         
         // Send progress updates to show activity
         for (let i = 0; i < 10; i++) {
@@ -123,8 +133,7 @@ export const createMp3WorkerUrl = (): string => {
           }, i * 100);
         }
         
-        // We're returning the WAV data in place of MP3 for now
-        // In a production app, you would use a proper MP3 encoder here
+        // Return the WAV data with a delay to simulate processing
         setTimeout(() => {
           console.log('Worker: Sending processed audio data');
           self.postMessage({ 
@@ -132,6 +141,51 @@ export const createMp3WorkerUrl = (): string => {
             mp3Buffer: wavBuffer
           }, [wavBuffer]);
         }, 1000);
+        return;
+      }
+      
+      try {
+        // Use lamejs for MP3 encoding
+        const Mp3Encoder = self.lamejs.Mp3Encoder;
+        const mp3encoder = new Mp3Encoder(channels, sampleRate, 128);
+        const wavData = new Int16Array(wavBuffer);
+        const blockSize = 1152; // Must be multiple of 576 for lamejs
+        const mp3Data = [];
+        
+        // Process the audio in chunks
+        for (let i = 0; i < wavData.length; i += blockSize) {
+          // Report progress
+          const progress = i / wavData.length;
+          self.postMessage({ type: 'progress', progress });
+          
+          // Encode a chunk
+          const sampleChunk = wavData.subarray(i, i + blockSize);
+          const mp3buf = mp3encoder.encodeBuffer(sampleChunk);
+          if (mp3buf.length > 0) {
+            mp3Data.push(new Int8Array(mp3buf));
+          }
+        }
+        
+        // Flush the encoder
+        const mp3buf = mp3encoder.flush();
+        if (mp3buf.length > 0) {
+          mp3Data.push(new Int8Array(mp3buf));
+        }
+        
+        // Combine all chunks
+        let totalLength = mp3Data.reduce((sum, arr) => sum + arr.length, 0);
+        let result = new Uint8Array(totalLength);
+        let offset = 0;
+        mp3Data.forEach(arr => {
+          result.set(arr, offset);
+          offset += arr.length;
+        });
+        
+        console.log('Worker: MP3 conversion complete (buffer size: ' + result.byteLength + ')');
+        self.postMessage({ 
+          type: 'complete', 
+          mp3Buffer: result.buffer 
+        }, [result.buffer]);
       } catch (error) {
         console.error('Worker error:', error);
         self.postMessage({ 

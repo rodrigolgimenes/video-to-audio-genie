@@ -14,7 +14,7 @@ const DownloadButton: React.FC<DownloadButtonProps> = ({ url, fileName }) => {
       <Button asChild className="w-full">
         <a href={url} download={fileName}>
           <Download className="mr-2 h-4 w-4" />
-          Download MP3
+          Download Audio
         </a>
       </Button>
     </div>
