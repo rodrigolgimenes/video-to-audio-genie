@@ -53,6 +53,27 @@ export function useAudioExtraction() {
         const audioBuffer = await audioContext.decodeAudioData(fileBuffer);
         logger(`Audio successfully decoded: ${audioBuffer.numberOfChannels} channels, ${audioBuffer.sampleRate}Hz, ${audioBuffer.length} samples`);
         
+        // Test lamejs availability before conversion
+        logger('PRE-CHECK: Testing lamejs availability before conversion...');
+        try {
+          const testScript = document.createElement('script');
+          testScript.src = '/libs/lamejs/lame.all.js';
+          testScript.onload = () => {
+            logger('PRE-CHECK: lamejs script loaded successfully in main thread');
+            if ((window as any).lamejs) {
+              logger(`PRE-CHECK: lamejs is available in global scope: ${typeof (window as any).lamejs}`);
+            } else {
+              logger('PRE-CHECK: lamejs not found in global scope after script load');
+            }
+          };
+          testScript.onerror = (e) => {
+            logger(`PRE-CHECK: Error loading lamejs script: ${e}`);
+          };
+          document.head.appendChild(testScript);
+        } catch (preCheckError) {
+          logger(`PRE-CHECK: Error testing lamejs: ${(preCheckError as Error).message}`);
+        }
+        
         // Step 4: Try to convert to MP3 first
         logger('Checking if lame.all.js is accessible...');
         try {

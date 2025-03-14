@@ -87,6 +87,7 @@ export async function convertAudioBufferToMp3(
         
         // Variable to track lamejs loading state
         let lameLoaded = false;
+        let lameGlobal = null;
         
         try {
           // Use correct path for importScripts
@@ -96,15 +97,28 @@ export async function convertAudioBufferToMp3(
           // Check if lamejs is actually loaded
           if (typeof self.lamejs === 'undefined') {
             console.error('Worker: lamejs was not defined after importScripts!');
+            self.postMessage({ 
+              type: 'log', 
+              message: 'LAMEJS CHECK: lamejs was not defined after importScripts'
+            });
             throw new Error('lamejs was not defined after importScripts');
           }
           
+          lameGlobal = self.lamejs;
           console.log('Worker: lamejs library loaded successfully', typeof self.lamejs);
           console.log('Worker: lamejs Mp3Encoder available:', typeof self.lamejs.Mp3Encoder);
+          self.postMessage({ 
+            type: 'log', 
+            message: 'LAMEJS CHECK: Library loaded. Type: ' + typeof self.lamejs + ', Mp3Encoder: ' + typeof self.lamejs.Mp3Encoder
+          });
           lameLoaded = true;
         } catch (e) {
           console.error('Worker: Failed to load lamejs library:', e);
           console.error('Worker: Error details:', e.stack || 'No stack trace');
+          self.postMessage({ 
+            type: 'log', 
+            message: 'LAMEJS CHECK FAILED: ' + e.message
+          });
           self.postMessage({ 
             type: 'error', 
             error: 'Failed to load MP3 encoder library: ' + e.message,
@@ -117,16 +131,38 @@ export async function convertAudioBufferToMp3(
             const { wavBuffer, channels, sampleRate, quality } = e.data;
             
             console.log('Worker: Starting MP3 encoding with ' + quality + 'kbps quality');
-            console.log('Worker: Input stats:', { channels, sampleRate, wavBufferSize: wavBuffer.byteLength });
+            self.postMessage({ 
+              type: 'log', 
+              message: 'Worker received data: ' + channels + ' channels, ' + sampleRate + 'Hz, ' + quality + 'kbps, buffer size: ' + wavBuffer.byteLength 
+            });
             
-            if (!lameLoaded) {
+            if (!lameLoaded || !lameGlobal) {
+              self.postMessage({ 
+                type: 'log', 
+                message: 'LAMEJS GLOBAL CHECK: lameLoaded=' + lameLoaded + ', lameGlobal=' + (lameGlobal ? 'exists' : 'null')
+              });
               throw new Error('Cannot encode MP3: lamejs library not loaded');
             }
             
             // Create MP3 encoder
             console.log('Worker: Creating Mp3Encoder instance');
-            const mp3encoder = new self.lamejs.Mp3Encoder(channels, sampleRate, quality);
-            console.log('Worker: Mp3Encoder created successfully');
+            self.postMessage({ type: 'log', message: 'About to create Mp3Encoder with: ' + channels + ', ' + sampleRate + ', ' + quality });
+            
+            // Explicitly check Mp3Encoder
+            if (typeof lameGlobal.Mp3Encoder !== 'function') {
+              self.postMessage({ 
+                type: 'log', 
+                message: 'CRITICAL ERROR: Mp3Encoder is not a function, type=' + typeof lameGlobal.Mp3Encoder
+              });
+              throw new Error('Mp3Encoder is not a constructor: ' + typeof lameGlobal.Mp3Encoder);
+            }
+            
+            // Create encoder and report
+            const mp3encoder = new lameGlobal.Mp3Encoder(channels, sampleRate, quality);
+            self.postMessage({ 
+              type: 'log', 
+              message: 'Mp3Encoder created: ' + (mp3encoder ? 'Success' : 'Failed')
+            });
             
             // Get WAV samples as float32, we need to convert to int16
             const wavBytes = new Uint8Array(wavBuffer);
@@ -156,6 +192,7 @@ export async function convertAudioBufferToMp3(
             }
             
             console.log('Worker: Extracted', samples.length, 'samples from WAV');
+            self.postMessage({ type: 'log', message: 'Extracted ' + samples.length + ' samples from WAV' });
             
             const blockSize = 1152; // MPEG1 Layer 3 requires 1152 samples per frame
             const mp3Data = [];
@@ -166,6 +203,23 @@ export async function convertAudioBufferToMp3(
             
             const totalBlocks = Math.ceil(samples.length / (channels * blockSize));
             console.log('Worker: Processing', totalBlocks, 'blocks');
+            
+            // Before encoding, let's check if the encoder works
+            try {
+              // Test encode a very small block
+              const testLeft = new Int16Array(blockSize);
+              const testMp3 = mp3encoder.encodeBuffer(testLeft);
+              self.postMessage({ 
+                type: 'log', 
+                message: 'TEST ENCODE SUCCESSFUL: buffer length=' + testMp3.length
+              });
+            } catch (testError) {
+              self.postMessage({ 
+                type: 'log', 
+                message: 'TEST ENCODE FAILED: ' + testError.message
+              });
+              throw testError;
+            }
             
             for (let i = 0; i < totalBlocks; i++) {
               const offset = i * channels * blockSize;
@@ -193,8 +247,19 @@ export async function convertAudioBufferToMp3(
                 mp3buf = mp3encoder.encodeBuffer(left);
               }
               
-              if (mp3buf.length > 0) {
+              if (mp3buf && mp3buf.length > 0) {
                 mp3Data.push(mp3buf);
+                if (i === 0) {
+                  self.postMessage({ 
+                    type: 'log', 
+                    message: 'First encode block successful: ' + mp3buf.length + ' bytes'
+                  });
+                }
+              } else if (i === 0) {
+                self.postMessage({ 
+                  type: 'log', 
+                  message: 'WARNING: First encode block returned empty buffer'
+                });
               }
               
               // Report progress
@@ -206,15 +271,34 @@ export async function convertAudioBufferToMp3(
             
             // Finalize
             console.log('Worker: Finalizing MP3 encoding');
+            self.postMessage({ type: 'log', message: 'Finalizing MP3 encoding with flush()' });
             const finalMp3buf = mp3encoder.flush();
-            if (finalMp3buf.length > 0) {
+            
+            if (finalMp3buf && finalMp3buf.length > 0) {
               mp3Data.push(finalMp3buf);
+              self.postMessage({ 
+                type: 'log', 
+                message: 'Flush successful: ' + finalMp3buf.length + ' bytes'
+              });
+            } else {
+              self.postMessage({ 
+                type: 'log', 
+                message: 'WARNING: Flush returned empty buffer'
+              });
             }
             
             // Combine all chunks
             let totalLength = 0;
             for (let i = 0; i < mp3Data.length; i++) {
               totalLength += mp3Data[i].length;
+            }
+            
+            if (totalLength === 0) {
+              self.postMessage({ 
+                type: 'log', 
+                message: 'ERROR: No MP3 data generated (totalLength=0)'
+              });
+              throw new Error('No MP3 data generated (buffer length is 0)');
             }
             
             const mp3Buffer = new Uint8Array(totalLength);
@@ -226,6 +310,10 @@ export async function convertAudioBufferToMp3(
             
             console.log('Worker: MP3 encoding complete, size: ' + mp3Buffer.length + ' bytes');
             self.postMessage({ 
+              type: 'log', 
+              message: 'MP3 encoding complete: ' + mp3Buffer.length + ' bytes'
+            });
+            self.postMessage({ 
               type: 'complete', 
               buffer: mp3Buffer.buffer,
               size: mp3Buffer.length
@@ -233,6 +321,10 @@ export async function convertAudioBufferToMp3(
           } catch (err) {
             console.error('Worker: MP3 encoding error:', err);
             console.error('Worker: Error stack:', err.stack || 'No stack trace');
+            self.postMessage({ 
+              type: 'log', 
+              message: 'ERROR IN WORKER: ' + err.message + (err.stack ? '\\nStack: ' + err.stack : '')
+            });
             self.postMessage({ 
               type: 'error', 
               error: 'MP3 encoding failed: ' + err.message,
@@ -258,9 +350,11 @@ export async function convertAudioBufferToMp3(
       
       // Handle worker messages
       worker.onmessage = (e) => {
-        const { type, progress, buffer, error, details, size } = e.data;
+        const { type, progress, buffer, error, details, size, message } = e.data;
         
-        if (type === 'progress' && onProgress) {
+        if (type === 'log' && message) {
+          log(`WORKER LOG: ${message}`);
+        } else if (type === 'progress' && onProgress) {
           onProgress(progress);
         } else if (type === 'complete') {
           clearTimeout(errorTimeout);
