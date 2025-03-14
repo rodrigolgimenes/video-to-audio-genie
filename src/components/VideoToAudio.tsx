@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { useToast } from "@/components/ui/use-toast";
+import { useToast } from "@/hooks/use-toast";
 import { Upload, Play, Download, Volume2, RefreshCw } from "lucide-react";
 import { readFileAsArrayBuffer, decodeAudioData, convertAudioBufferToWav, convertWavToMp3 } from '@/lib/audioConverter';
 
@@ -16,9 +16,15 @@ const VideoToAudio: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [fileName, setFileName] = useState('');
+  const [logs, setLogs] = useState<string[]>([]);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
+
+  const addLog = (message: string) => {
+    console.log(message);
+    setLogs(prev => [...prev, `${new Date().toISOString().split('T')[1].split('.')[0]} - ${message}`]);
+  };
 
   const handleFileChange = useCallback((file: File) => {
     if (!file) return;
@@ -38,6 +44,7 @@ const VideoToAudio: React.FC = () => {
     setFileName(file.name);
     setError(null);
     setMp3Url(null);
+    setLogs([]);
     
     toast({
       title: "File selected",
@@ -104,55 +111,83 @@ const VideoToAudio: React.FC = () => {
       setIsProcessing(true);
       setProgress(0);
       setError(null);
+      setLogs([]);
       
       // Step 1: Read the video file as ArrayBuffer
+      addLog("Starting to read video file as ArrayBuffer");
       const videoArrayBuffer = await readFileAsArrayBuffer(selectedFile);
+      addLog(`Successfully read video file (${videoArrayBuffer.byteLength} bytes)`);
       
       // Step 2: Create AudioContext and decode the audio
+      addLog("Creating AudioContext");
       const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
-      const audioBuffer = await decodeAudioData(audioContext, videoArrayBuffer);
+      addLog("AudioContext created, starting audio decoding");
       
-      // Step 3: Convert AudioBuffer to WAV
-      const wavBuffer = convertAudioBufferToWav(audioBuffer);
-      
-      // Step 4: Convert WAV to MP3 using a Web Worker
-      let finalMp3Buffer: ArrayBuffer | null = null;
-      
-      while (finalMp3Buffer === null) {
-        const { mp3Buffer, progress } = await convertWavToMp3(
-          wavBuffer.slice(0), // Create a copy since the worker consumes the original
-          audioBuffer.numberOfChannels,
-          audioBuffer.sampleRate
-        );
+      try {
+        const audioBuffer = await decodeAudioData(audioContext, videoArrayBuffer);
+        addLog(`Audio decoded successfully: ${audioBuffer.numberOfChannels} channels, ${audioBuffer.sampleRate}Hz, ${audioBuffer.length} samples`);
         
-        setProgress(progress * 100);
+        // Step 3: Convert AudioBuffer to WAV
+        addLog("Converting AudioBuffer to WAV format");
+        const wavBuffer = convertAudioBufferToWav(audioBuffer);
+        addLog(`WAV conversion complete (${wavBuffer.byteLength} bytes)`);
         
-        if (progress === 1) {
-          finalMp3Buffer = mp3Buffer;
+        // Step 4: Convert WAV to MP3 using a Web Worker
+        addLog("Starting WAV to MP3 conversion with Web Worker");
+        let finalMp3Buffer: ArrayBuffer | null = null;
+        
+        try {
+          while (finalMp3Buffer === null) {
+            const { mp3Buffer, progress } = await convertWavToMp3(
+              wavBuffer.slice(0), // Create a copy since the worker consumes the original
+              audioBuffer.numberOfChannels,
+              audioBuffer.sampleRate
+            );
+            
+            setProgress(progress * 100);
+            addLog(`Conversion progress: ${Math.round(progress * 100)}%`);
+            
+            if (progress === 1) {
+              finalMp3Buffer = mp3Buffer;
+              addLog(`MP3 conversion complete (${finalMp3Buffer.byteLength} bytes)`);
+            }
+          }
+          
+          // Step 5: Create a Blob from the MP3 buffer
+          addLog("Creating MP3 Blob");
+          const mp3Blob = new Blob([finalMp3Buffer], { type: 'audio/mpeg' });
+          
+          // Step 6: Create a download URL
+          addLog("Generating download URL");
+          const url = URL.createObjectURL(mp3Blob);
+          setMp3Url(url);
+          
+          toast({
+            title: "Conversion complete!",
+            description: "Your audio file is ready for download."
+          });
+          addLog("Conversion process completed successfully");
+        } catch (conversionError) {
+          addLog(`Error in MP3 conversion: ${conversionError instanceof Error ? conversionError.message : 'Unknown error'}`);
+          throw conversionError;
         }
+      } catch (decodeError) {
+        addLog(`Error decoding audio: ${decodeError instanceof Error ? decodeError.message : 'Unknown error'}`);
+        throw new Error(`Failed to decode audio from video. The format might not be supported: ${decodeError instanceof Error ? decodeError.message : 'Unknown error'}`);
       }
-      
-      // Step 5: Create a Blob from the MP3 buffer
-      const mp3Blob = new Blob([finalMp3Buffer], { type: 'audio/mpeg' });
-      
-      // Step 6: Create a download URL
-      const url = URL.createObjectURL(mp3Blob);
-      setMp3Url(url);
-      
-      toast({
-        title: "Conversion complete!",
-        description: "Your audio file is ready for download."
-      });
     } catch (err) {
       console.error("Error extracting audio:", err);
-      setError(err instanceof Error ? err.message : 'An unknown error occurred during audio extraction');
+      const errorMessage = err instanceof Error ? err.message : 'An unknown error occurred during audio extraction';
+      setError(errorMessage);
+      addLog(`Extraction failed: ${errorMessage}`);
       toast({
         title: "Conversion failed",
-        description: err instanceof Error ? err.message : 'An unknown error occurred during audio extraction',
+        description: errorMessage,
         variant: "destructive"
       });
     } finally {
       setIsProcessing(false);
+      addLog("Process finished");
     }
   };
 
@@ -179,12 +214,12 @@ const VideoToAudio: React.FC = () => {
             ref={fileInputRef}
             accept="video/*"
             className="hidden"
-            onChange={handleFileSelect}
+            onChange={(e) => handleFileSelect(e)}
           />
           
           {!selectedFile && (
             <div
-              className={`dropzone ${isDragging ? 'active' : ''}`}
+              className={`border-2 border-dashed border-gray-300 rounded-lg p-6 text-center cursor-pointer transition-colors ${isDragging ? 'border-primary bg-primary/5' : 'hover:bg-accent'}`}
               onDragEnter={handleDragEnter}
               onDragLeave={handleDragLeave}
               onDragOver={handleDragOver}
@@ -252,6 +287,19 @@ const VideoToAudio: React.FC = () => {
                       Download MP3
                     </a>
                   </Button>
+                </div>
+              )}
+              
+              {logs.length > 0 && (
+                <div className="mt-4">
+                  <details className="text-xs">
+                    <summary className="cursor-pointer text-muted-foreground">Show processing logs</summary>
+                    <div className="mt-2 p-3 bg-muted rounded-md overflow-y-auto max-h-40">
+                      {logs.map((log, index) => (
+                        <div key={index} className="font-mono">{log}</div>
+                      ))}
+                    </div>
+                  </details>
                 </div>
               )}
             </div>

@@ -1,10 +1,12 @@
-
 // Function to read a file as an ArrayBuffer
 export const readFileAsArrayBuffer = (file: File): Promise<ArrayBuffer> => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(reader.result as ArrayBuffer);
-    reader.onerror = reject;
+    reader.onerror = (event) => {
+      console.error("FileReader error:", event);
+      reject(new Error("Failed to read the file"));
+    };
     reader.readAsArrayBuffer(file);
   });
 };
@@ -12,9 +14,28 @@ export const readFileAsArrayBuffer = (file: File): Promise<ArrayBuffer> => {
 // Function to decode audio data from an ArrayBuffer
 export const decodeAudioData = async (audioContext: AudioContext, arrayBuffer: ArrayBuffer): Promise<AudioBuffer> => {
   try {
-    return await audioContext.decodeAudioData(arrayBuffer);
+    console.log(`Attempting to decode audio data of size ${arrayBuffer.byteLength} bytes`);
+    
+    // Clone the buffer to avoid "buffer detached" errors
+    const bufferCopy = arrayBuffer.slice(0);
+    
+    try {
+      const result = await audioContext.decodeAudioData(bufferCopy);
+      console.log(`Audio successfully decoded: ${result.numberOfChannels} channels, ${result.sampleRate}Hz, ${result.length} samples`);
+      return result;
+    } catch (decodeError) {
+      console.error("Browser decodeAudioData failed:", decodeError);
+      
+      // Try an alternative approach for specific errors
+      if (decodeError instanceof DOMException && decodeError.name === "EncodingError") {
+        console.log("Trying alternative decoding method...");
+        // Here you could implement an alternative decoder or fallback
+      }
+      
+      throw new Error(`Failed to decode audio: ${decodeError instanceof Error ? decodeError.message : 'Unknown error'}`);
+    }
   } catch (error) {
-    console.error("Error decoding audio data:", error);
+    console.error("Error in decodeAudioData function:", error);
     throw new Error("Failed to decode audio from video. The video format might not be supported.");
   }
 };
@@ -150,31 +171,42 @@ export const createMp3ConversionWorker = (): Worker => {
 // Convert WAV buffer to MP3 using a Web Worker
 export const convertWavToMp3 = (wavBuffer: ArrayBuffer, channels: number, sampleRate: number): Promise<{ mp3Buffer: ArrayBuffer, progress: number }> => {
   return new Promise((resolve, reject) => {
+    console.log(`Starting MP3 conversion: channels=${channels}, sampleRate=${sampleRate}, wavBuffer size=${wavBuffer.byteLength}`);
     const worker = createMp3ConversionWorker();
     
     worker.onmessage = (event) => {
       const { type, mp3Buffer, progress } = event.data;
       
       if (type === 'progress') {
+        console.log(`MP3 conversion progress: ${Math.round(progress * 100)}%`);
         // If it's a progress update, we don't resolve yet but can report progress
         resolve({ mp3Buffer: new ArrayBuffer(0), progress });
       } else if (type === 'complete') {
         // Once complete, resolve with the final MP3 buffer
+        console.log(`MP3 conversion complete: buffer size=${mp3Buffer.byteLength}`);
         worker.terminate();
         resolve({ mp3Buffer, progress: 1 });
       }
     };
     
     worker.onerror = (error) => {
+      console.error("Worker error:", error);
       worker.terminate();
-      reject(error);
+      reject(new Error(`MP3 conversion failed: ${error.message}`));
     };
     
     // Send the WAV data to the worker for processing
-    worker.postMessage({
-      wavBuffer: wavBuffer,
-      channels: channels,
-      sampleRate: sampleRate
-    }, [wavBuffer]);
+    try {
+      worker.postMessage({
+        wavBuffer: wavBuffer,
+        channels: channels,
+        sampleRate: sampleRate
+      }, [wavBuffer]);
+      console.log("WAV data sent to worker for processing");
+    } catch (postError) {
+      console.error("Error posting message to worker:", postError);
+      worker.terminate();
+      reject(new Error(`Failed to start MP3 conversion: ${postError instanceof Error ? postError.message : 'Unknown error'}`));
+    }
   });
 };
