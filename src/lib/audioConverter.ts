@@ -1,3 +1,4 @@
+
 // Function to read a file as an ArrayBuffer
 export const readFileAsArrayBuffer = (file: File): Promise<ArrayBuffer> => {
   return new Promise((resolve, reject) => {
@@ -155,16 +156,16 @@ export const convertWavToMp3 = (wavBuffer: ArrayBuffer, channels: number, sample
         worker.terminate();
         resolve({ mp3Buffer, progress: 1, format });
       } else if (type === 'error') {
-        console.error("Worker error:", error);
+        console.error("Worker error:", event.data.error);
         worker.terminate();
-        reject(new Error(`Conversion failed: ${error}`));
+        reject(new Error(`Conversion failed: ${event.data.error}`));
       }
     };
     
-    worker.onerror = (error) => {
-      console.error("Worker error:", error);
+    worker.onerror = (errorEvent) => {
+      console.error("Worker error:", errorEvent);
       worker.terminate();
-      reject(new Error(`Conversion failed: ${error.message}`));
+      reject(new Error(`Conversion failed: ${errorEvent.message}`));
     };
     
     // Send the WAV data to the worker for processing
