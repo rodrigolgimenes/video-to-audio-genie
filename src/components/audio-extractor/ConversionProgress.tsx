@@ -18,8 +18,21 @@ const ConversionProgress: React.FC<ConversionProgressProps> = ({ progress, logs,
   const errorLogs = logs?.filter(log => log.includes('ERROR:') || log.includes('CRITICAL')) || [];
   
   // Check if lamejs is being loaded properly
-  const lamejsLogs = logs?.filter(log => log.includes('lamejs') || log.includes('LAMEJS')) || [];
-  const workerLogs = logs?.filter(log => log.includes('Worker:')) || [];
+  const lamejsLogs = logs?.filter(log => 
+    log.includes('lamejs') || 
+    log.includes('LAMEJS') || 
+    log.includes('lame.all.js')
+  ) || [];
+  
+  const workerLogs = logs?.filter(log => log.includes('Worker:') || log.includes('WORKER LOG:')) || [];
+  
+  // URL related logs
+  const pathLogs = logs?.filter(log => 
+    log.includes('/libs/lamejs') || 
+    log.includes('URL') || 
+    log.includes('path') || 
+    log.includes('origin')
+  ) || [];
   
   return (
     <div className="space-y-4">
@@ -33,7 +46,7 @@ const ConversionProgress: React.FC<ConversionProgressProps> = ({ progress, logs,
       
       {error && (
         <Alert variant="destructive" className="my-2">
-          <AlertDescription>{error}</AlertDescription>
+          <AlertDescription className="whitespace-pre-wrap">{error}</AlertDescription>
         </Alert>
       )}
       
@@ -75,6 +88,21 @@ const ConversionProgress: React.FC<ConversionProgressProps> = ({ progress, logs,
                   </div>
                 </div>
                 
+                <div className="mb-3">
+                  <div className="font-medium text-sm mb-1 text-purple-500">Path & URL Info:</div>
+                  <div className="bg-muted rounded-md p-2 overflow-x-auto max-h-32 overflow-y-auto">
+                    {pathLogs.length > 0 ? (
+                      pathLogs.map((log, i) => (
+                        <div key={`path-${i}`} className={`${log.includes('ERROR') || log.includes('CRITICAL') || log.includes('FAILED') ? 'text-red-500' : log.includes('WARNING') ? 'text-yellow-500' : ''}`}>
+                          {log}
+                        </div>
+                      ))
+                    ) : (
+                      <div className="text-yellow-500">No path or URL logs found!</div>
+                    )}
+                  </div>
+                </div>
+                
                 {errorLogs.length > 0 && (
                   <div className="mb-3">
                     <div className="font-medium text-sm mb-1 text-red-500">Errors:</div>
@@ -111,7 +139,7 @@ const ConversionProgress: React.FC<ConversionProgressProps> = ({ progress, logs,
                         {logs.map((log, index) => (
                           <TableRow key={index} className={`${log.includes('ERROR') || log.includes('CRITICAL') ? 'text-red-500' : log.includes('WARNING') ? 'text-yellow-500' : ''}`}>
                             <TableCell className="py-1">{index + 1}</TableCell>
-                            <TableCell className="py-1 font-mono">{log}</TableCell>
+                            <TableCell className="py-1 font-mono whitespace-pre-wrap break-all">{log}</TableCell>
                           </TableRow>
                         ))}
                       </TableBody>

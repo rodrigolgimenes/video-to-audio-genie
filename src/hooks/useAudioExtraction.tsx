@@ -55,13 +55,22 @@ export function useAudioExtraction() {
     } else {
       addLog('Environment check: lamejs is NOT available in global scope, will attempt dynamic loading');
       
-      // Try loading lamejs script
+      // Try loading lamejs script in main thread to verify it's accessible
       try {
         const script = document.createElement('script');
-        script.src = '/libs/lamejs/lame.all.js';
+        const fullPath = window.location.origin + '/libs/lamejs/lame.all.js';
+        script.src = fullPath;
+        addLog(`Environment check: Trying to load lamejs from ${fullPath}`);
+        
         script.onload = () => {
           if (typeof (window as any).lamejs !== 'undefined') {
             addLog(`Environment check: Successfully loaded lamejs dynamically: ${typeof (window as any).lamejs}`);
+            // Check if it has the Mp3Encoder
+            if (typeof (window as any).lamejs.Mp3Encoder === 'function') {
+              addLog('Environment check: Mp3Encoder constructor is available after dynamic load');
+            } else {
+              addErrorLog('Environment check: Mp3Encoder is not available after dynamic load');
+            }
           } else {
             addErrorLog('Environment check: lamejs failed to load into global scope after dynamic loading');
           }
@@ -81,6 +90,19 @@ export function useAudioExtraction() {
     } else {
       addErrorLog('Environment check: Blob URL creation is NOT supported - audio download will fail');
     }
+    
+    // Check if the libs/lamejs/lame.all.js file is accessible
+    fetch(window.location.origin + '/libs/lamejs/lame.all.js', { method: 'HEAD' })
+      .then(response => {
+        if (response.ok) {
+          addLog(`Environment check: lame.all.js is accessible at ${response.url} (status: ${response.status})`);
+        } else {
+          addErrorLog(`Environment check: lame.all.js is NOT accessible (status: ${response.status})`);
+        }
+      })
+      .catch(err => {
+        addErrorLog(`Environment check: Error checking lame.all.js accessibility: ${err.message}`);
+      });
     
     addLog('Environment check: Diagnostics complete');
   }, [addLog, addErrorLog]);
@@ -118,7 +140,10 @@ export function useAudioExtraction() {
         logger('PRE-CHECK: Testing lamejs availability before conversion...');
         try {
           const testScript = document.createElement('script');
-          testScript.src = '/libs/lamejs/lame.all.js';
+          const fullPath = window.location.origin + '/libs/lamejs/lame.all.js';
+          testScript.src = fullPath;
+          logger(`PRE-CHECK: Trying to load lamejs from ${fullPath}`);
+          
           testScript.onload = () => {
             logger('PRE-CHECK: lamejs script loaded successfully in main thread');
             if ((window as any).lamejs) {
@@ -157,17 +182,20 @@ export function useAudioExtraction() {
           logger(`PRE-CHECK: Error testing lamejs: ${(preCheckError as Error).message}`);
         }
         
-        // Step 4: Try to convert to MP3 first
+        // Step 4: Check if lame.all.js is accessible
         logger('Checking if lame.all.js is accessible...');
         try {
           // Try to verify if the lame.all.js file is accessible
-          const testResponse = await fetch('/libs/lamejs/lame.all.js', { method: 'HEAD' });
+          const fullPathToLib = window.location.origin + '/libs/lamejs/lame.all.js';
+          logger(`Checking if lame.all.js is accessible at ${fullPathToLib}`);
+          
+          const testResponse = await fetch(fullPathToLib, { method: 'HEAD' });
           if (testResponse.ok) {
-            logger(`lame.all.js is accessible at /libs/lamejs/lame.all.js (status: ${testResponse.status})`);
+            logger(`lame.all.js is accessible at ${fullPathToLib} (status: ${testResponse.status})`);
             
             // Try to fetch it to see the content
             try {
-              const scriptContent = await fetch('/libs/lamejs/lame.all.js').then(r => r.text());
+              const scriptContent = await fetch(fullPathToLib).then(r => r.text());
               logger(`Successfully fetched lame.all.js content (${scriptContent.length} characters)`);
               logger(`First 100 characters: ${scriptContent.substring(0, 100)}...`);
             } catch (fetchContentError) {

@@ -1,4 +1,3 @@
-
 import { log } from './logger';
 
 // AudioBuffer to WAV converter (only as fallback if MP3 conversion fails)
@@ -74,6 +73,10 @@ export async function convertAudioBufferToMp3(
       // First convert to WAV for processing
       const wavBuffer = convertAudioBufferToWav(audioBuffer);
       
+      // Get base URL for worker to properly load resources
+      const baseUrl = window.location.origin;
+      log(`Base URL for resources: ${baseUrl}`);
+      
       // Create a worker with inline code - Fixed to avoid "Illegal return statement" error
       const workerCode = `
         // Worker for MP3 encoding using lamejs
@@ -90,9 +93,12 @@ export async function convertAudioBufferToMp3(
         let lameGlobal = null;
         
         try {
-          // Use correct path for importScripts
-          console.log('Worker: Attempting to load lamejs from /libs/lamejs/lame.all.js');
-          importScripts('/libs/lamejs/lame.all.js');
+          // Use full URL path to ensure the worker can find the library
+          const lameJsUrl = '${baseUrl}/libs/lamejs/lame.all.js';
+          console.log('Worker: Attempting to load lamejs from ' + lameJsUrl);
+          self.postMessage({ type: 'log', message: 'Worker: Attempting to load lamejs from ' + lameJsUrl });
+          
+          importScripts(lameJsUrl);
           
           // Check if lamejs is actually loaded
           if (typeof self.lamejs === 'undefined') {
@@ -146,7 +152,10 @@ export async function convertAudioBufferToMp3(
             
             // Create MP3 encoder
             console.log('Worker: Creating Mp3Encoder instance');
-            self.postMessage({ type: 'log', message: 'About to create Mp3Encoder with: ' + channels + ', ' + sampleRate + ', ' + quality });
+            self.postMessage({ 
+              type: 'log', 
+              message: 'About to create Mp3Encoder with: ' + channels + ', ' + sampleRate + ', ' + quality 
+            });
             
             // Explicitly check Mp3Encoder
             if (typeof lameGlobal.Mp3Encoder !== 'function') {
@@ -162,6 +171,12 @@ export async function convertAudioBufferToMp3(
             self.postMessage({ 
               type: 'log', 
               message: 'Mp3Encoder created: ' + (mp3encoder ? 'Success' : 'Failed')
+            });
+            
+            // Get WAV samples and convert them
+            self.postMessage({ 
+              type: 'log', 
+              message: 'Encoding progress: Starting actual encoding of MP3 data'
             });
             
             // Get WAV samples as float32, we need to convert to int16
