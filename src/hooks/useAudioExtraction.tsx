@@ -1,5 +1,5 @@
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { convertAudioBufferToWav, convertAudioBufferToMp3, createLogger } from '../lib/audioConverter';
 import { log as globalLog, error as globalError } from '../lib/logger';
 
@@ -23,6 +23,67 @@ export function useAudioExtraction() {
     globalError(message);
     setLogs(prev => [...prev, `${new Date().toISOString().split('T')[1].split('.')[0]} - ERROR: ${message}`]);
   }, []);
+
+  // Check lamejs availability on load
+  useEffect(() => {
+    addLog('Environment check: Starting diagnostics...');
+    
+    // Check if AudioContext is available
+    if (typeof AudioContext !== 'undefined' || typeof (window as any).webkitAudioContext !== 'undefined') {
+      addLog('Environment check: AudioContext is available');
+    } else {
+      addErrorLog('Environment check: AudioContext is NOT available - audio processing will fail');
+    }
+    
+    // Check if Web Workers are available
+    if (typeof Worker !== 'undefined') {
+      addLog('Environment check: Web Workers are available');
+    } else {
+      addErrorLog('Environment check: Web Workers are NOT available - MP3 conversion will fail');
+    }
+    
+    // Test lamejs global availability
+    if (typeof (window as any).lamejs !== 'undefined') {
+      addLog(`Environment check: lamejs is available in global scope: ${typeof (window as any).lamejs}`);
+      
+      // Check Mp3Encoder
+      if (typeof (window as any).lamejs.Mp3Encoder === 'function') {
+        addLog('Environment check: Mp3Encoder constructor is available');
+      } else {
+        addErrorLog(`Environment check: Mp3Encoder is not available or not a constructor: ${typeof (window as any).lamejs.Mp3Encoder}`);
+      }
+    } else {
+      addLog('Environment check: lamejs is NOT available in global scope, will attempt dynamic loading');
+      
+      // Try loading lamejs script
+      try {
+        const script = document.createElement('script');
+        script.src = '/libs/lamejs/lame.all.js';
+        script.onload = () => {
+          if (typeof (window as any).lamejs !== 'undefined') {
+            addLog(`Environment check: Successfully loaded lamejs dynamically: ${typeof (window as any).lamejs}`);
+          } else {
+            addErrorLog('Environment check: lamejs failed to load into global scope after dynamic loading');
+          }
+        };
+        script.onerror = (e) => {
+          addErrorLog(`Environment check: Failed to load lamejs script: ${e}`);
+        };
+        document.head.appendChild(script);
+      } catch (err) {
+        addErrorLog(`Environment check: Error during dynamic script loading: ${(err as Error).message}`);
+      }
+    }
+    
+    // Check for blob URL support
+    if (typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function') {
+      addLog('Environment check: Blob URL creation is supported');
+    } else {
+      addErrorLog('Environment check: Blob URL creation is NOT supported - audio download will fail');
+    }
+    
+    addLog('Environment check: Diagnostics complete');
+  }, [addLog, addErrorLog]);
 
   const extractAudio = useCallback(async (selectedFile: File, quality: number = 128) => {
     if (!selectedFile) return;
@@ -62,6 +123,28 @@ export function useAudioExtraction() {
             logger('PRE-CHECK: lamejs script loaded successfully in main thread');
             if ((window as any).lamejs) {
               logger(`PRE-CHECK: lamejs is available in global scope: ${typeof (window as any).lamejs}`);
+              
+              // Check Mp3Encoder specifically
+              if (typeof (window as any).lamejs.Mp3Encoder === 'function') {
+                logger('PRE-CHECK: Mp3Encoder constructor is available and is a function');
+                
+                // Try creating an encoder instance to validate
+                try {
+                  const testEncoder = new (window as any).lamejs.Mp3Encoder(1, 44100, quality);
+                  logger(`PRE-CHECK: Successfully created test Mp3Encoder: ${typeof testEncoder}`);
+                  
+                  // Test if the encoder has the expected methods
+                  if (typeof testEncoder.encodeBuffer === 'function' && typeof testEncoder.flush === 'function') {
+                    logger('PRE-CHECK: Mp3Encoder has the expected methods (encodeBuffer, flush)');
+                  } else {
+                    logger('PRE-CHECK: WARNING: Mp3Encoder does not have expected methods');
+                  }
+                } catch (encErr) {
+                  logger(`PRE-CHECK: ERROR creating Mp3Encoder instance: ${(encErr as Error).message}`);
+                }
+              } else {
+                logger(`PRE-CHECK: WARNING: Mp3Encoder is not a constructor: ${typeof (window as any).lamejs.Mp3Encoder}`);
+              }
             } else {
               logger('PRE-CHECK: lamejs not found in global scope after script load');
             }
@@ -81,6 +164,15 @@ export function useAudioExtraction() {
           const testResponse = await fetch('/libs/lamejs/lame.all.js', { method: 'HEAD' });
           if (testResponse.ok) {
             logger(`lame.all.js is accessible at /libs/lamejs/lame.all.js (status: ${testResponse.status})`);
+            
+            // Try to fetch it to see the content
+            try {
+              const scriptContent = await fetch('/libs/lamejs/lame.all.js').then(r => r.text());
+              logger(`Successfully fetched lame.all.js content (${scriptContent.length} characters)`);
+              logger(`First 100 characters: ${scriptContent.substring(0, 100)}...`);
+            } catch (fetchContentError) {
+              logger(`WARNING: Could not read lame.all.js content: ${(fetchContentError as Error).message}`);
+            }
           } else {
             logger(`WARNING: lame.all.js might not be accessible (status: ${testResponse.status})`);
           }
