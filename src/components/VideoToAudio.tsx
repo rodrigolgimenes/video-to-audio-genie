@@ -8,16 +8,21 @@ import FileInputArea from "@/components/audio-extractor/FileInputArea";
 import ConversionProgress from "@/components/audio-extractor/ConversionProgress";
 import DownloadButton from "@/components/audio-extractor/DownloadButton";
 import { useAudioExtraction } from "@/hooks/useAudioExtraction";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 
 const VideoToAudio: React.FC = () => {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [fileName, setFileName] = useState('');
+  const [highQuality, setHighQuality] = useState(true);
   
   const {
     isProcessing,
     progress,
     audioUrl,
     audioFormat,
+    audioSize,
     error,
     logs,
     extractAudio,
@@ -43,13 +48,22 @@ const VideoToAudio: React.FC = () => {
 
   const handleExtractAudio = useCallback(() => {
     if (selectedFile) {
-      extractAudio(selectedFile);
+      extractAudio(selectedFile, highQuality ? 192 : 128);
     }
-  }, [selectedFile, extractAudio]);
+  }, [selectedFile, extractAudio, highQuality]);
 
   // Format output size based on the file extension
   const getFormatLabel = () => {
     return audioFormat === 'audio/wav' ? 'WAV (não comprimido)' : 'MP3 (comprimido)';
+  };
+
+  // Format file size to a readable format
+  const formatFileSize = (bytes: number | undefined) => {
+    if (!bytes) return '';
+    
+    if (bytes < 1024) return bytes + ' bytes';
+    else if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    else return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
   };
 
   return (
@@ -81,25 +95,59 @@ const VideoToAudio: React.FC = () => {
           )}
           
           {!isProcessing && !audioUrl && selectedFile && (
-            <Button 
-              className="w-full" 
-              onClick={handleExtractAudio}
-              disabled={isProcessing}
-            >
-              <Volume2 className="mr-2 h-4 w-4" />
-              Extrair Áudio
-            </Button>
+            <>
+              <div className="flex items-center space-x-2 mb-2">
+                <Checkbox 
+                  id="high-quality" 
+                  checked={highQuality} 
+                  onCheckedChange={(checked) => setHighQuality(checked as boolean)}
+                />
+                <label 
+                  htmlFor="high-quality" 
+                  className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                >
+                  Alta qualidade (arquivo maior)
+                </label>
+              </div>
+              <Button 
+                className="w-full" 
+                onClick={handleExtractAudio}
+                disabled={isProcessing}
+              >
+                <Volume2 className="mr-2 h-4 w-4" />
+                Extrair Áudio
+              </Button>
+            </>
           )}
           
           {audioUrl && (
             <>
-              <div className="text-center text-sm text-muted-foreground mb-2">
-                Formato: {getFormatLabel()}
+              <div className="flex flex-col items-center gap-2 text-center">
+                <div className="flex gap-2 items-center">
+                  <Badge variant="secondary">{getFormatLabel()}</Badge>
+                  {audioSize && <Badge variant="outline">{formatFileSize(audioSize)}</Badge>}
+                </div>
+                <DownloadButton 
+                  url={audioUrl} 
+                  fileName={getOutputFileName(fileName || 'audio.mp3')} 
+                />
               </div>
-              <DownloadButton 
-                url={audioUrl} 
-                fileName={getOutputFileName(fileName || 'audio.mp3')} 
-              />
+
+              <Collapsible className="w-full mt-4">
+                <CollapsibleTrigger className="text-xs text-muted-foreground hover:text-foreground transition-colors w-full text-center">
+                  Informações técnicas
+                </CollapsibleTrigger>
+                <CollapsibleContent className="mt-2">
+                  <div className="text-xs text-muted-foreground space-y-1 p-2 bg-muted/50 rounded-md">
+                    <p>Formato: {audioFormat}</p>
+                    <p>Tamanho: {formatFileSize(audioSize)}</p>
+                    <p>Qualidade: {highQuality ? 'Alta (192kbps)' : 'Normal (128kbps)'}</p>
+                    <p>Arquivo original: {formatFileSize(selectedFile?.size)}</p>
+                    <p>Redução: {selectedFile?.size && audioSize ? 
+                      `${((1 - audioSize / selectedFile.size) * 100).toFixed(0)}%` : 'N/A'}</p>
+                  </div>
+                </CollapsibleContent>
+              </Collapsible>
             </>
           )}
         </CardContent>

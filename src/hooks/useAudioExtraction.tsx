@@ -13,6 +13,7 @@ export const useAudioExtraction = () => {
   const [progress, setProgress] = useState(0);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [audioFormat, setAudioFormat] = useState<string>('audio/mpeg');
+  const [audioSize, setAudioSize] = useState<number | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
   const { toast } = useToast();
@@ -22,7 +23,7 @@ export const useAudioExtraction = () => {
     setLogs(prev => [...prev, `${new Date().toISOString().split('T')[1].split('.')[0]} - ${message}`]);
   }, []);
 
-  const extractAudio = useCallback(async (selectedFile: File) => {
+  const extractAudio = useCallback(async (selectedFile: File, quality: number = 192) => {
     if (!selectedFile) return;
     
     try {
@@ -31,6 +32,7 @@ export const useAudioExtraction = () => {
       setError(null);
       setLogs([]);
       setAudioUrl(null);
+      setAudioSize(undefined);
       
       // Step 1: Read the video file as ArrayBuffer
       addLog("Starting to read video file as ArrayBuffer");
@@ -52,7 +54,7 @@ export const useAudioExtraction = () => {
         addLog(`WAV conversion complete (${wavBuffer.byteLength} bytes)`);
         
         // Step 4: Process the audio data
-        addLog("Starting MP3 conversion with Web Worker");
+        addLog(`Starting MP3 conversion with Web Worker (quality: ${quality}kbps)`);
         
         let conversionAttempts = 0;
         const maxAttempts = 3;
@@ -85,6 +87,7 @@ export const useAudioExtraction = () => {
                 }
                 
                 addLog(`Processing complete (${finalBuffer.byteLength} bytes) as ${format}`);
+                setAudioSize(finalBuffer.byteLength);
                 
                 // Create the audio blob and URL
                 const audioBlob = new Blob([finalBuffer], { type: format });
@@ -92,12 +95,15 @@ export const useAudioExtraction = () => {
                 const url = URL.createObjectURL(audioBlob);
                 setAudioUrl(url);
                 
+                const compressionRatio = selectedFile.size > 0 ? 
+                  (1 - (finalBuffer.byteLength / selectedFile.size)) * 100 : 0;
+                
                 toast({
-                  title: "Conversion complete!",
-                  description: `Your audio file is ready for download as ${format === 'audio/mpeg' ? 'MP3' : 'WAV'}.`
+                  title: "Conversão concluída!",
+                  description: `Seu arquivo de áudio está pronto para download como ${format === 'audio/mpeg' ? 'MP3' : 'WAV'} (redução de ${compressionRatio.toFixed(0)}%).`
                 });
                 
-                addLog("Conversion process completed successfully");
+                addLog(`Conversion process completed successfully. Compression ratio: ${compressionRatio.toFixed(1)}%`);
                 setIsProcessing(false);
                 return true;
               }
@@ -123,7 +129,8 @@ export const useAudioExtraction = () => {
                 convertWavToMp3(
                   wavBufferCopy,
                   audioBuffer.numberOfChannels,
-                  audioBuffer.sampleRate
+                  audioBuffer.sampleRate,
+                  quality
                 )
                   .then(result => {
                     if (conversionTimeout) {
@@ -157,6 +164,7 @@ export const useAudioExtraction = () => {
                 // Fall back to WAV if MP3 conversion failed
                 finalBuffer = wavBuffer.slice(0);
                 format = 'audio/wav';
+                setAudioSize(finalBuffer.byteLength);
                 
                 // Create a WAV blob and URL
                 const audioBlob = new Blob([finalBuffer], { type: format });
@@ -165,8 +173,8 @@ export const useAudioExtraction = () => {
                 setAudioUrl(url);
                 
                 toast({
-                  title: "Conversion complete!",
-                  description: "Your audio file is ready for download (WAV format)."
+                  title: "Conversão concluída!",
+                  description: "Seu arquivo de áudio está pronto para download (formato WAV)."
                 });
                 
                 addLog("Conversion process completed with WAV fallback");
@@ -195,7 +203,7 @@ export const useAudioExtraction = () => {
       setError(errorMessage);
       addLog(`Extraction failed: ${errorMessage}`);
       toast({
-        title: "Conversion failed",
+        title: "Falha na conversão",
         description: errorMessage,
         variant: "destructive"
       });
@@ -215,6 +223,7 @@ export const useAudioExtraction = () => {
     progress,
     audioUrl,
     audioFormat,
+    audioSize,
     error,
     logs,
     extractAudio,
