@@ -73,7 +73,7 @@ const VideoToAudio: React.FC = () => {
         <CardHeader>
           <CardTitle className="text-2xl font-bold text-center">Conversor de Vídeo para Áudio</CardTitle>
           <CardDescription className="text-center">
-            Extraia áudio dos seus vídeos e baixe como MP3 comprimido
+            Extraia áudio dos seus vídeos com máxima compressão MP3
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
@@ -116,7 +116,7 @@ const VideoToAudio: React.FC = () => {
                 disabled={isProcessing}
               >
                 <Volume2 className="mr-2 h-4 w-4" />
-                Extrair Áudio MP3 Comprimido
+                Extrair Áudio MP3 com Máxima Compressão
               </Button>
             </>
           )}
@@ -143,7 +143,7 @@ const VideoToAudio: React.FC = () => {
                   <div className="text-xs text-muted-foreground space-y-1 p-2 bg-muted/50 rounded-md">
                     <p>Formato: {audioFormat}</p>
                     <p>Tamanho: {formatFileSize(audioSize)}</p>
-                    <p>Qualidade: {highQuality ? 'Melhor (192kbps)' : 'Comprimido (128kbps)'}</p>
+                    <p>Qualidade: {highQuality ? '192kbps' : '128kbps (mais comprimido)'}</p>
                     <p>Arquivo original: {formatFileSize(selectedFile?.size)}</p>
                     <p>Redução: {selectedFile?.size && audioSize ? 
                       `${((1 - audioSize / selectedFile.size) * 100).toFixed(0)}%` : 'N/A'}</p>

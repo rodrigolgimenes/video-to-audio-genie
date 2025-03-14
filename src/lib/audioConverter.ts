@@ -1,3 +1,4 @@
+
 import { log } from './logger';
 
 // AudioBuffer to WAV converter (only as fallback if MP3 conversion fails)
@@ -80,8 +81,8 @@ export async function convertAudioBufferToMp3(
       const workerCode = `
         // Import lamejs library from public path
         try {
-          // Using full absolute URL to ensure the library is found
-          importScripts('${baseUrl}/libs/lamejs/lame.all.js');
+          // CRITICAL FIX: Use absolute path without relying on baseUrl
+          importScripts('/libs/lamejs/lame.all.js');
           console.log('Worker: lamejs library loaded successfully');
         } catch (e) {
           console.error('Worker: Failed to load lamejs library:', e);
@@ -201,11 +202,11 @@ export async function convertAudioBufferToMp3(
       const workerUrl = URL.createObjectURL(workerBlob);
       const worker = new Worker(workerUrl);
       
-      // Error timeout (10 seconds)
+      // Error timeout (30 seconds)
       const errorTimeout = setTimeout(() => {
         worker.terminate();
         URL.revokeObjectURL(workerUrl);
-        reject(new Error('MP3 conversion timed out after 10 seconds'));
+        reject(new Error('MP3 conversion timed out after 30 seconds'));
       }, 30000);
       
       // Handle worker messages
