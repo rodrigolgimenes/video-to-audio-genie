@@ -1,7 +1,7 @@
 
 import { useState, useCallback } from 'react';
 import { convertAudioBufferToWav, convertAudioBufferToMp3, createLogger } from '../lib/audioConverter';
-import { log as globalLog } from '../lib/logger';
+import { log as globalLog, error as globalError } from '../lib/logger';
 
 export function useAudioExtraction() {
   const [isProcessing, setIsProcessing] = useState(false);
@@ -16,6 +16,12 @@ export function useAudioExtraction() {
   const addLog = useCallback((message: string) => {
     globalLog(message);
     setLogs(prev => [...prev, `${new Date().toISOString().split('T')[1].split('.')[0]} - ${message}`]);
+  }, []);
+  
+  // Helper to add error logs
+  const addErrorLog = useCallback((message: string) => {
+    globalError(message);
+    setLogs(prev => [...prev, `${new Date().toISOString().split('T')[1].split('.')[0]} - ERROR: ${message}`]);
   }, []);
 
   const extractAudio = useCallback(async (selectedFile: File, quality: number = 128) => {
@@ -48,6 +54,19 @@ export function useAudioExtraction() {
         logger(`Audio successfully decoded: ${audioBuffer.numberOfChannels} channels, ${audioBuffer.sampleRate}Hz, ${audioBuffer.length} samples`);
         
         // Step 4: Try to convert to MP3 first
+        logger(`Checking if lame.all.js is accessible...`);
+        try {
+          // Try to verify if the lame.all.js file is accessible
+          const testResponse = await fetch('/libs/lamejs/lame.all.js', { method: 'HEAD' });
+          if (testResponse.ok) {
+            logger(`lame.all.js is accessible at /libs/lamejs/lame.all.js (status: ${testResponse.status})`);
+          } else {
+            logger(`WARNING: lame.all.js might not be accessible (status: ${testResponse.status})`);
+          }
+        } catch (fetchError) {
+          logger(`WARNING: Could not check lame.all.js accessibility: ${fetchError.message}`);
+        }
+        
         try {
           logger(`Starting MP3 conversion (quality: ${quality}kbps)`);
           const { buffer: mp3Buffer, format } = await convertAudioBufferToMp3(
@@ -67,7 +86,7 @@ export function useAudioExtraction() {
           logger(`MP3 conversion successful: ${blob.size} bytes`);
           
         } catch (mp3Error) {
-          logger(`MP3 conversion failed: ${mp3Error.message}`);
+          addErrorLog(`MP3 conversion failed: ${mp3Error.message}`);
           logger('Falling back to WAV format (larger file)');
           
           // Fallback to WAV if MP3 conversion fails
@@ -90,11 +109,11 @@ export function useAudioExtraction() {
       
     } catch (error) {
       setError(`Erro na conversão: ${error.message}`);
-      addLog(`Error: ${error.message}`);
+      addErrorLog(`Error: ${error.message}`);
     } finally {
       setIsProcessing(false);
     }
-  }, [addLog]);
+  }, [addLog, addErrorLog]);
 
   // Generate appropriate output filename based on input
   const getOutputFileName = useCallback((inputFileName: string) => {

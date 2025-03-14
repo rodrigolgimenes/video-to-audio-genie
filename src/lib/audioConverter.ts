@@ -74,19 +74,36 @@ export async function convertAudioBufferToMp3(
       // First convert to WAV for processing
       const wavBuffer = convertAudioBufferToWav(audioBuffer);
       
-      // Get the full origin URL to ensure we get the right base path
-      const baseUrl = window.location.origin;
-      
       // Create a worker with inline code
       const workerCode = `
         // Import lamejs library from public path
+        self.addEventListener('error', function(e) {
+          console.error('Worker global error:', e.message);
+          self.postMessage({ type: 'error', error: 'Worker error: ' + e.message });
+        });
+
+        console.log('Worker: Starting to load lamejs library...');
+        
         try {
-          // CRITICAL FIX: Use absolute path without relying on baseUrl
+          // CRITICAL FIX: Use absolute path and log the attempt
+          console.log('Worker: Attempting to load lamejs from /libs/lamejs/lame.all.js');
           importScripts('/libs/lamejs/lame.all.js');
-          console.log('Worker: lamejs library loaded successfully');
+          
+          // Check if lamejs is actually loaded
+          if (typeof lamejs === 'undefined') {
+            throw new Error('lamejs was not defined after importScripts');
+          }
+          
+          console.log('Worker: lamejs library loaded successfully', typeof lamejs);
+          console.log('Worker: lamejs Mp3Encoder available:', typeof lamejs.Mp3Encoder);
         } catch (e) {
           console.error('Worker: Failed to load lamejs library:', e);
-          self.postMessage({ type: 'error', error: 'Failed to load MP3 encoder library: ' + e.message });
+          console.error('Worker: Error details:', e.stack || 'No stack trace');
+          self.postMessage({ 
+            type: 'error', 
+            error: 'Failed to load MP3 encoder library: ' + e.message,
+            details: e.stack || 'No stack trace'
+          });
           return;
         }
 
@@ -94,10 +111,13 @@ export async function convertAudioBufferToMp3(
           const { wavBuffer, channels, sampleRate, quality } = e.data;
           
           console.log('Worker: Starting MP3 encoding with ' + quality + 'kbps quality');
+          console.log('Worker: Input stats:', { channels, sampleRate, wavBufferSize: wavBuffer.byteLength });
           
           try {
             // Create MP3 encoder
+            console.log('Worker: Creating Mp3Encoder instance');
             const mp3encoder = new lamejs.Mp3Encoder(channels, sampleRate, quality);
+            console.log('Worker: Mp3Encoder created successfully');
             
             // Get WAV samples as float32, we need to convert to int16
             const wavBytes = new Uint8Array(wavBuffer);
@@ -108,8 +128,13 @@ export async function convertAudioBufferToMp3(
               if (wavBytes[i] === 100 && wavBytes[i+1] === 97 && wavBytes[i+2] === 116 && wavBytes[i+3] === 97) {
                 // 'data' chunk found, skip the identifier and chunk size (8 bytes)
                 dataStartIndex = i + 8;
+                console.log('Worker: Found data chunk at index', i, 'data starts at', dataStartIndex);
                 break;
               }
+            }
+            
+            if (dataStartIndex === 0) {
+              throw new Error('Could not find data chunk in WAV file');
             }
             
             // Get samples from WAV
@@ -121,6 +146,8 @@ export async function convertAudioBufferToMp3(
               samples[i] = (wavBytes[idx] | (wavBytes[idx + 1] << 8));
             }
             
+            console.log('Worker: Extracted', samples.length, 'samples from WAV');
+            
             const blockSize = 1152; // MPEG1 Layer 3 requires 1152 samples per frame
             const mp3Data = [];
             
@@ -129,6 +156,7 @@ export async function convertAudioBufferToMp3(
             const right = channels > 1 ? new Int16Array(blockSize) : null;
             
             const totalBlocks = Math.ceil(samples.length / (channels * blockSize));
+            console.log('Worker: Processing', totalBlocks, 'blocks');
             
             for (let i = 0; i < totalBlocks; i++) {
               const offset = i * channels * blockSize;
@@ -161,11 +189,14 @@ export async function convertAudioBufferToMp3(
               }
               
               // Report progress
-              const progress = Math.min(100, Math.round((i / totalBlocks) * 100));
-              self.postMessage({ type: 'progress', progress });
+              if (i % 10 === 0 || i === totalBlocks - 1) {
+                const progress = Math.min(100, Math.round((i / totalBlocks) * 100));
+                self.postMessage({ type: 'progress', progress });
+              }
             }
             
             // Finalize
+            console.log('Worker: Finalizing MP3 encoding');
             const finalMp3buf = mp3encoder.flush();
             if (finalMp3buf.length > 0) {
               mp3Data.push(finalMp3buf);
@@ -192,7 +223,12 @@ export async function convertAudioBufferToMp3(
             }, [mp3Buffer.buffer]);
           } catch (err) {
             console.error('Worker: MP3 encoding error:', err);
-            self.postMessage({ type: 'error', error: 'MP3 encoding failed: ' + err.message });
+            console.error('Worker: Error stack:', err.stack || 'No stack trace');
+            self.postMessage({ 
+              type: 'error', 
+              error: 'MP3 encoding failed: ' + err.message,
+              details: err.stack || 'No stack trace'
+            });
           }
         };
       `;
@@ -211,7 +247,7 @@ export async function convertAudioBufferToMp3(
       
       // Handle worker messages
       worker.onmessage = (e) => {
-        const { type, progress, buffer, error, size } = e.data;
+        const { type, progress, buffer, error, details, size } = e.data;
         
         if (type === 'progress' && onProgress) {
           onProgress(progress);
@@ -229,7 +265,8 @@ export async function convertAudioBufferToMp3(
           clearTimeout(errorTimeout);
           worker.terminate();
           URL.revokeObjectURL(workerUrl);
-          reject(new Error(error));
+          log(`Worker error: ${error}${details ? '\nDetails: ' + details : ''}`);
+          reject(new Error(error + (details ? '\nDetails: ' + details : '')));
         }
       };
       
