@@ -99,8 +99,8 @@ export const createMp3WorkerUrl = (): string => {
   const workerCode = `
     // Import lamejs library from public path
     try {
-      // Using an absolute path to ensure the library is found
-      importScripts('/libs/lamejs/lame.all.js');
+      // Using a relative path to ensure the library is found - important fix
+      importScripts('./libs/lamejs/lame.all.js');
       console.log('Worker: lamejs library loaded successfully');
     } catch (e) {
       console.error('Worker: Failed to load lamejs library:', e);

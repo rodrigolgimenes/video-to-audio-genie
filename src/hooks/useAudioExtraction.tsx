@@ -23,7 +23,7 @@ export const useAudioExtraction = () => {
     setLogs(prev => [...prev, `${new Date().toISOString().split('T')[1].split('.')[0]} - ${message}`]);
   }, []);
 
-  const extractAudio = useCallback(async (selectedFile: File, quality: number = 192) => {
+  const extractAudio = useCallback(async (selectedFile: File, quality: number = 256) => {
     if (!selectedFile) return;
     
     try {
@@ -53,7 +53,7 @@ export const useAudioExtraction = () => {
         const wavBuffer = convertAudioBufferToWav(audioBuffer);
         addLog(`WAV conversion complete (${wavBuffer.byteLength} bytes)`);
         
-        // Step 4: Process the audio data
+        // Step 4: Process the audio data - always try MP3 first
         addLog(`Starting MP3 conversion with Web Worker (quality: ${quality}kbps)`);
         
         let conversionAttempts = 0;
