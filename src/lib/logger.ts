@@ -1,8 +1,7 @@
-
 // Enhanced logger utility with detailed timestamps, categories, and user-friendly messaging
 
 // Log categories for better organization
-export type LogCategory = 'INFO' | 'ERROR' | 'DEBUG' | 'WARN' | 'LAMEJS' | 'WORKER' | 'DATA' | 'PROCESS' | 'FORMAT' | 'VALIDATION' | 'USER' | 'CONVERTER';
+export type LogCategory = 'INFO' | 'ERROR' | 'DEBUG' | 'WARN' | 'LAMEJS' | 'WORKER' | 'DATA' | 'PROCESS' | 'FORMAT' | 'VALIDATION' | 'USER' | 'CONVERTER' | 'TRANSCRIPT';
 
 // Global array to store all logs for access across components
 let globalLogs: {message: string, category: LogCategory, timestamp: string}[] = [];
@@ -128,6 +127,10 @@ export const logConverter = (message: string) => {
   return log(message, 'CONVERTER');
 };
 
+export const logTranscript = (message: string) => {
+  return log(message, 'TRANSCRIPT');
+};
+
 // Helper function to format logs for UI display
 export const formatLogsForDisplay = () => {
   return globalLogs.map(log => {
@@ -173,4 +176,3 @@ export const searchLogs = (term: string) => {
     return `${time} ${log.category}: ${log.message}`;  
   });
 };
-

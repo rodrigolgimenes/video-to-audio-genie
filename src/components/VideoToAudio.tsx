@@ -1,13 +1,14 @@
-
 import React, { useState, useCallback, useEffect } from 'react';
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import { Volume2, Info } from "lucide-react";
+import { Volume2, Info, FileText } from "lucide-react";
 import FileInputArea from "@/components/audio-extractor/FileInputArea";
 import ConversionProgress from "@/components/audio-extractor/ConversionProgress";
 import DownloadButton from "@/components/audio-extractor/DownloadButton";
+import TranscriptionResult from "@/components/audio-extractor/TranscriptionResult";
 import { useAudioExtraction } from "@/hooks/useAudioExtraction";
+import { useTranscription } from "@/hooks/useTranscription";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
@@ -32,7 +33,14 @@ const VideoToAudio: React.FC = () => {
     allLogs
   } = useAudioExtraction();
 
-  // Gather browser information for debugging
+  const {
+    isTranscribing,
+    transcriptionResult,
+    transcriptionError,
+    transcriptionLogs,
+    startTranscription
+  } = useTranscription();
+
   useEffect(() => {
     const info: Record<string, any> = {
       userAgent: navigator.userAgent,
@@ -45,14 +53,12 @@ const VideoToAudio: React.FC = () => {
       url: typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function',
     };
     
-    // Check for lamejs in global scope
     if (typeof (window as any).lamejs !== 'undefined') {
       info.lameJs = 'Available globally';
     } else {
       info.lameJs = 'Not available globally';
     }
     
-    // Check browser's MP3 encoding capabilities
     try {
       const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
       info.sampleRate = audioContext.sampleRate;
@@ -64,7 +70,6 @@ const VideoToAudio: React.FC = () => {
     setBrowserInfo(info);
   }, []);
 
-  // Set conversion complete when audioUrl is available
   useEffect(() => {
     if (audioUrl) {
       setConversionComplete(true);
@@ -80,7 +85,6 @@ const VideoToAudio: React.FC = () => {
   const handleFileChange = useCallback((file: File) => {
     if (!file) return;
     
-    // Check if it's a video file
     if (!file.type.includes('video/')) {
       toast.error("Por favor, selecione um arquivo de vídeo");
       return;
@@ -99,17 +103,31 @@ const VideoToAudio: React.FC = () => {
 
   const handleExtractAudio = useCallback(() => {
     if (selectedFile) {
-      // Always use 64kbps for smallest file size
       extractAudio(selectedFile, 64);
     }
   }, [selectedFile, extractAudio]);
 
-  // Format output size based on the file extension
+  const handleTranscribe = useCallback(async () => {
+    if (!audioUrl) {
+      toast.error("É necessário extrair o áudio primeiro");
+      return;
+    }
+    
+    try {
+      const response = await fetch(audioUrl);
+      const audioBlob = await response.blob();
+      
+      startTranscription(audioBlob);
+    } catch (error) {
+      toast.error("Erro ao preparar áudio para transcrição");
+      console.error(error);
+    }
+  }, [audioUrl, startTranscription]);
+
   const getFormatLabel = () => {
     return audioFormat === 'audio/wav' ? 'WAV (não comprimido)' : 'MP3 (máxima compressão)';
   };
 
-  // Format file size to a readable format
   const formatFileSize = (bytes: number | undefined) => {
     if (!bytes) return '';
     
@@ -122,9 +140,9 @@ const VideoToAudio: React.FC = () => {
     <div className="flex flex-col items-center justify-center w-full max-w-3xl mx-auto p-4">
       <Card className="w-full">
         <CardHeader>
-          <CardTitle className="text-2xl font-bold text-center">Conversor de Vídeo para Áudio</CardTitle>
+          <CardTitle className="text-2xl font-bold text-center">Conversor e Transcritor de Vídeo</CardTitle>
           <CardDescription className="text-center">
-            Extraia áudio dos seus vídeos com máxima compressão MP3
+            Extraia áudio dos seus vídeos com máxima compressão MP3 e transcreva o conteúdo
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
@@ -173,16 +191,34 @@ const VideoToAudio: React.FC = () => {
                   <Badge variant="secondary">{getFormatLabel()}</Badge>
                   {audioSize && <Badge variant="outline">{formatFileSize(audioSize)}</Badge>}
                 </div>
-                <DownloadButton 
-                  url={audioUrl} 
-                  fileName={getOutputFileName(fileName || 'audio.mp3')} 
-                  format={audioFormat}
-                />
+                <div className="flex gap-2 w-full">
+                  <DownloadButton 
+                    url={audioUrl} 
+                    fileName={getOutputFileName(fileName || 'audio.mp3')} 
+                    format={audioFormat}
+                  />
+                  <Button 
+                    variant="outline" 
+                    className="flex-1"
+                    onClick={handleTranscribe}
+                    disabled={isTranscribing}
+                  >
+                    <FileText className="mr-2 h-4 w-4" />
+                    {isTranscribing ? 'Transcrevendo...' : 'Transcrever Áudio'}
+                  </Button>
+                </div>
               </div>
             </>
           )}
           
-          {/* Browser Information Debugging Panel */}
+          {(isTranscribing || transcriptionResult || transcriptionError) && (
+            <TranscriptionResult
+              result={transcriptionResult}
+              isLoading={isTranscribing}
+              error={transcriptionError}
+            />
+          )}
+          
           <Collapsible className="w-full mt-4">
             <CollapsibleTrigger className="flex items-center justify-center text-xs text-muted-foreground hover:text-foreground transition-colors w-full">
               <Info className="h-3 w-3 mr-1" />
