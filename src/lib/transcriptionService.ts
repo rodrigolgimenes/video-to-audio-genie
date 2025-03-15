@@ -12,6 +12,9 @@ export type TranscriptionResult = {
   language?: string;
 };
 
+// Update the backend URL to point to your actual fast-whisper service
+const FAST_WHISPER_API_URL = 'http://localhost:9000/asr'; // Update this to your actual fast-whisper endpoint
+
 export const transcribeAudio = async (
   audioBlob: Blob, 
   onProgress?: (message: string) => void
@@ -31,12 +34,12 @@ export const transcribeAudio = async (
     logConverter(`Arquivo de áudio preparado: ${(audioBlob.size / 1024 / 1024).toFixed(2)}MB`);
     
     if (onProgress) {
-      onProgress('Enviando áudio para transcrição...');
+      onProgress('Enviando áudio para servidor fast-whisper...');
     }
     
-    // Send request to the fast-whisper API endpoint
-    logConverter('Enviando requisição para o servidor fast-whisper');
-    const response = await fetch('/api/transcribe', {
+    // Send request to the actual fast-whisper API endpoint
+    logConverter(`Enviando requisição para ${FAST_WHISPER_API_URL}`);
+    const response = await fetch(FAST_WHISPER_API_URL, {
       method: 'POST',
       body: formData,
     });
@@ -46,13 +49,28 @@ export const transcribeAudio = async (
       throw new Error(`Falha na transcrição: ${response.status} - ${errorText}`);
     }
     
-    logConverter('Resposta recebida do servidor, processando resultado');
+    logConverter('Resposta recebida do servidor fast-whisper, processando resultado');
     
     if (onProgress) {
       onProgress('Processando resultado da transcrição...');
     }
     
-    const result = await response.json();
+    const rawResult = await response.json();
+    
+    // Transform API result to match our expected format if needed
+    // Fast-whisper typically returns results in this format, but we'll handle transformation if needed
+    const result: TranscriptionResult = {
+      text: rawResult.text || '',
+      language: rawResult.language || 'pt',
+      segments: Array.isArray(rawResult.segments) 
+        ? rawResult.segments.map((segment: any, index: number) => ({
+            id: index,
+            start: segment.start || 0,
+            end: segment.end || 0,
+            text: segment.text || ''
+          }))
+        : []
+    };
     
     // Log success information
     logConverter(`Transcrição concluída com sucesso: ${result.text.length} caracteres`);

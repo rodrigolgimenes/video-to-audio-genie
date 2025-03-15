@@ -78,19 +78,21 @@ const TranscriptionResult: React.FC<TranscriptionResultProps> = ({
             Copiar
           </Button>
         </div>
-        <CardDescription className="flex items-center gap-2">
-          {result.language && (
-            <Badge variant="outline" className="flex items-center gap-1">
-              <Languages className="h-3 w-3" />
-              {result.language}
-            </Badge>
-          )}
-          {result.segments && (
-            <Badge variant="outline" className="flex items-center gap-1">
-              <Clock className="h-3 w-3" />
-              {formatTime(result.segments[result.segments.length - 1]?.end || 0)}
-            </Badge>
-          )}
+        <CardDescription>
+          <div className="flex items-center gap-2">
+            {result.language && (
+              <Badge variant="outline" className="flex items-center gap-1">
+                <Languages className="h-3 w-3" />
+                {result.language}
+              </Badge>
+            )}
+            {result.segments && (
+              <Badge variant="outline" className="flex items-center gap-1">
+                <Clock className="h-3 w-3" />
+                {formatTime(result.segments[result.segments.length - 1]?.end || 0)}
+              </Badge>
+            )}
+          </div>
         </CardDescription>
       </CardHeader>
       <CardContent>

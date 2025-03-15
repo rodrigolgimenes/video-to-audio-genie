@@ -23,7 +23,8 @@ export function useTranscription() {
       setTranscriptionError(null);
       setTranscriptionLogs([]);
       
-      addLog('Iniciando processo de transcrição do áudio');
+      addLog('Iniciando processo de transcrição do áudio com Fast Whisper');
+      addLog(`Tamanho do arquivo de áudio: ${(audioBlob.size / 1024 / 1024).toFixed(2)}MB`);
       
       const result = await transcribeAudio(audioBlob, (progress) => {
         addLog(progress);
