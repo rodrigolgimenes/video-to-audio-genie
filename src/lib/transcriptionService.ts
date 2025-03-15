@@ -13,7 +13,7 @@ export type TranscriptionResult = {
 };
 
 // Update the backend URL to point to your actual fast-whisper service
-const FAST_WHISPER_API_URL = import.meta.env.VITE_FAST_WHISPER_API_URL || 'http://localhost:9000/asr';
+const FAST_WHISPER_API_URL = import.meta.env.VITE_FAST_WHISPER_API_URL || 'https://whisper-api.lovable.dev/asr';
 
 export const transcribeAudio = async (
   audioBlob: Blob, 
@@ -43,6 +43,8 @@ export const transcribeAudio = async (
     const response = await fetch(FAST_WHISPER_API_URL, {
       method: 'POST',
       body: formData,
+      // Add CORS headers to support cross-origin requests
+      mode: 'cors',
     });
     
     if (!response.ok) {
