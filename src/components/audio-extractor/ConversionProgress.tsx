@@ -1,12 +1,14 @@
 
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { Progress } from "@/components/ui/progress";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { InfoIcon, AlertTriangleIcon, AlertCircleIcon, FileTextIcon, ServerIcon, CodeIcon } from "lucide-react";
+import { InfoIcon, AlertTriangleIcon, AlertCircleIcon, FileTextIcon, ServerIcon, CodeIcon, ArrowDownIcon, TerminalIcon } from "lucide-react";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { getAllLogs, LogCategory } from "@/lib/logger";
 
 interface ConversionProgressProps {
   progress: number;
@@ -29,7 +31,28 @@ const ConversionProgress: React.FC<ConversionProgressProps> = ({
   originalFileSize,
   videoFileName
 }) => {
-  // Group logs by type to organize them better
+  const logsEndRef = useRef<HTMLDivElement>(null);
+  
+  // Get all detailed logs from logger system
+  const allSystemLogs = getAllLogs();
+  
+  // Auto-scroll to bottom of logs when new logs come in
+  useEffect(() => {
+    if (logsEndRef.current) {
+      logsEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [logs, allSystemLogs]);
+  
+  // Group logs by category for better organization
+  const groupedLogs = allSystemLogs.reduce((acc, log) => {
+    if (!acc[log.category]) {
+      acc[log.category] = [];
+    }
+    acc[log.category].push(log);
+    return acc;
+  }, {} as Record<LogCategory, typeof allSystemLogs>);
+  
+  // Original logs passed from parent
   const generalLogs = logs?.filter(log => !log.includes('ERROR:') && !log.includes('WARNING:') && !log.includes('CRITICAL')) || [];
   const warningLogs = logs?.filter(log => log.includes('WARNING:')) || [];
   const errorLogs = logs?.filter(log => log.includes('ERROR:') || log.includes('CRITICAL')) || [];
@@ -226,11 +249,40 @@ const ConversionProgress: React.FC<ConversionProgressProps> = ({
         </Alert>
       )}
       
+      {/* NEW SECTION: Detailed Process Logs */}
+      <Accordion type="single" collapsible className="w-full" defaultValue="item-0">
+        <AccordionItem value="item-0">
+          <AccordionTrigger className="text-sm font-medium flex items-center">
+            <TerminalIcon className="h-4 w-4 mr-2" />
+            Logs do Processo de Conversão
+          </AccordionTrigger>
+          <AccordionContent>
+            <ScrollArea className="h-[300px] rounded-md border p-2 bg-muted/20">
+              <div className="space-y-1 font-mono text-xs">
+                {allSystemLogs.map((log, i) => (
+                  <div key={`syslog-${i}`} className={`
+                    ${log.category === 'ERROR' ? 'text-red-500' : ''}
+                    ${log.category === 'WARN' ? 'text-yellow-500' : ''}
+                    ${log.category === 'LAMEJS' ? 'text-purple-500' : ''}
+                    ${log.category === 'WORKER' ? 'text-blue-500' : ''}
+                    ${log.category === 'USER' ? 'font-semibold text-green-600' : ''}
+                  `}>
+                    {log.timestamp.split('T')[1].split('.')[0]} [{log.category}] {log.message}
+                  </div>
+                ))}
+                <div ref={logsEndRef} />
+              </div>
+            </ScrollArea>
+          </AccordionContent>
+        </AccordionItem>
+      </Accordion>
+      
+      {/* Original diagnostic logs UI */}
       {logs && logs.length > 0 && (
         <Accordion type="single" collapsible className="w-full" defaultValue={isComplete ? "item-2" : "item-1"}>
           <AccordionItem value="item-1">
             <AccordionTrigger className="text-sm font-medium">
-              Logs de Processamento ({logs.length})
+              Logs de Diagnóstico ({logs.length})
             </AccordionTrigger>
             <AccordionContent>
               <div className="text-xs font-mono">
@@ -239,14 +291,22 @@ const ConversionProgress: React.FC<ConversionProgressProps> = ({
                     <ServerIcon className="h-4 w-4 mr-1" /> Status LameJS:
                   </div>
                   <div className="bg-muted rounded-md p-2 overflow-x-auto max-h-32 overflow-y-auto">
-                    {lamejsLogs.length > 0 ? (
-                      lamejsLogs.map((log, i) => (
-                        <div key={`lamejs-${i}`} className={`${log.includes('ERROR') || log.includes('CRITICAL') || log.includes('FAILED') ? 'text-red-500' : log.includes('WARNING') ? 'text-yellow-500' : 'text-green-500'}`}>
-                          {log}
+                    {groupedLogs['LAMEJS'] && groupedLogs['LAMEJS'].length > 0 ? (
+                      groupedLogs['LAMEJS'].map((log, i) => (
+                        <div key={`lamejs-${i}`} className={`${log.message.includes('ERROR') || log.message.includes('CRITICAL') || log.message.includes('FAILED') ? 'text-red-500' : log.message.includes('WARNING') ? 'text-yellow-500' : 'text-green-500'}`}>
+                          {log.timestamp.split('T')[1].split('.')[0]} - {log.message}
                         </div>
                       ))
                     ) : (
-                      <div className="text-red-500">Nenhum log do LameJS encontrado!</div>
+                      lamejsLogs.length > 0 ? (
+                        lamejsLogs.map((log, i) => (
+                          <div key={`lamejs-${i}`} className={`${log.includes('ERROR') || log.includes('CRITICAL') || log.includes('FAILED') ? 'text-red-500' : log.includes('WARNING') ? 'text-yellow-500' : 'text-green-500'}`}>
+                            {log}
+                          </div>
+                        ))
+                      ) : (
+                        <div className="text-red-500">Nenhum log do LameJS encontrado!</div>
+                      )
                     )}
                   </div>
                 </div>
@@ -256,56 +316,81 @@ const ConversionProgress: React.FC<ConversionProgressProps> = ({
                     <CodeIcon className="h-4 w-4 mr-1" /> Status do Worker:
                   </div>
                   <div className="bg-muted rounded-md p-2 overflow-x-auto max-h-32 overflow-y-auto">
-                    {workerLogs.length > 0 ? (
-                      workerLogs.map((log, i) => (
-                        <div key={`worker-${i}`} className={`${log.includes('ERROR') || log.includes('CRITICAL') || log.includes('FAILED') ? 'text-red-500' : log.includes('WARNING') ? 'text-yellow-500' : ''}`}>
-                          {log}
+                    {groupedLogs['WORKER'] && groupedLogs['WORKER'].length > 0 ? (
+                      groupedLogs['WORKER'].map((log, i) => (
+                        <div key={`worker-${i}`} className={`${log.message.includes('ERROR') || log.message.includes('CRITICAL') || log.message.includes('FAILED') ? 'text-red-500' : log.message.includes('WARNING') ? 'text-yellow-500' : ''}`}>
+                          {log.timestamp.split('T')[1].split('.')[0]} - {log.message}
                         </div>
                       ))
                     ) : (
-                      <div className="text-yellow-500">Nenhum log do Worker encontrado!</div>
+                      workerLogs.length > 0 ? (
+                        workerLogs.map((log, i) => (
+                          <div key={`worker-${i}`} className={`${log.includes('ERROR') || log.includes('CRITICAL') || log.includes('FAILED') ? 'text-red-500' : log.includes('WARNING') ? 'text-yellow-500' : ''}`}>
+                            {log}
+                          </div>
+                        ))
+                      ) : (
+                        <div className="text-yellow-500">Nenhum log do Worker encontrado!</div>
+                      )
                     )}
                   </div>
                 </div>
                 
                 <div className="mb-3">
                   <div className="font-medium text-sm mb-1 text-purple-500 flex items-center">
-                    <FileTextIcon className="h-4 w-4 mr-1" /> Informações de URL e Caminhos:
+                    <FileTextIcon className="h-4 w-4 mr-1" /> Processamento de Dados de Áudio:
                   </div>
                   <div className="bg-muted rounded-md p-2 overflow-x-auto max-h-32 overflow-y-auto">
-                    {pathLogs.length > 0 ? (
-                      pathLogs.map((log, i) => (
-                        <div key={`path-${i}`} className={`${log.includes('ERROR') || log.includes('CRITICAL') || log.includes('FAILED') ? 'text-red-500' : log.includes('WARNING') ? 'text-yellow-500' : ''}`}>
-                          {log}
+                    {groupedLogs['DATA'] && groupedLogs['DATA'].length > 0 ? (
+                      groupedLogs['DATA'].map((log, i) => (
+                        <div key={`data-${i}`} className={`${log.message.includes('ERROR') || log.message.includes('CRITICAL') || log.message.includes('FAILED') ? 'text-red-500' : log.message.includes('WARNING') ? 'text-yellow-500' : ''}`}>
+                          {log.timestamp.split('T')[1].split('.')[0]} - {log.message}
                         </div>
                       ))
                     ) : (
-                      <div className="text-yellow-500">Nenhum log de caminhos ou URLs encontrado!</div>
+                      <div className="text-yellow-500">Nenhum log de processamento de dados encontrado!</div>
                     )}
                   </div>
                 </div>
                 
-                {errorLogs.length > 0 && (
+                <div className="mb-3">
+                  <div className="font-medium text-sm mb-1 text-green-500 flex items-center">
+                    <FileTextIcon className="h-4 w-4 mr-1" /> Validação de Formato:
+                  </div>
+                  <div className="bg-muted rounded-md p-2 overflow-x-auto max-h-32 overflow-y-auto">
+                    {groupedLogs['FORMAT'] && groupedLogs['FORMAT'].length > 0 ? (
+                      groupedLogs['FORMAT'].map((log, i) => (
+                        <div key={`format-${i}`} className={`${log.message.includes('ERROR') || log.message.includes('CRITICAL') || log.message.includes('FAILED') ? 'text-red-500' : log.message.includes('WARNING') ? 'text-yellow-500' : ''}`}>
+                          {log.timestamp.split('T')[1].split('.')[0]} - {log.message}
+                        </div>
+                      ))
+                    ) : (
+                      <div className="text-yellow-500">Nenhum log de validação de formato encontrado!</div>
+                    )}
+                  </div>
+                </div>
+                
+                {groupedLogs['ERROR'] && groupedLogs['ERROR'].length > 0 && (
                   <div className="mb-3">
                     <div className="font-medium text-sm mb-1 text-red-500 flex items-center">
                       <AlertCircleIcon className="h-4 w-4 mr-1" /> Erros:
                     </div>
                     <div className="bg-red-950/20 text-red-500 rounded-md p-2 overflow-x-auto max-h-32 overflow-y-auto">
-                      {errorLogs.map((log, i) => (
-                        <div key={`error-${i}`}>{log}</div>
+                      {groupedLogs['ERROR'].map((log, i) => (
+                        <div key={`error-${i}`}>{log.timestamp.split('T')[1].split('.')[0]} - {log.message}</div>
                       ))}
                     </div>
                   </div>
                 )}
                 
-                {warningLogs.length > 0 && (
+                {groupedLogs['WARN'] && groupedLogs['WARN'].length > 0 && (
                   <div className="mb-3">
                     <div className="font-medium text-sm mb-1 text-yellow-500 flex items-center">
                       <AlertTriangleIcon className="h-4 w-4 mr-1" /> Avisos:
                     </div>
                     <div className="bg-yellow-950/20 text-yellow-500 rounded-md p-2 overflow-x-auto max-h-32 overflow-y-auto">
-                      {warningLogs.map((log, i) => (
-                        <div key={`warning-${i}`}>{log}</div>
+                      {groupedLogs['WARN'].map((log, i) => (
+                        <div key={`warning-${i}`}>{log.timestamp.split('T')[1].split('.')[0]} - {log.message}</div>
                       ))}
                     </div>
                   </div>
@@ -320,6 +405,8 @@ const ConversionProgress: React.FC<ConversionProgressProps> = ({
                       <TableHeader>
                         <TableRow>
                           <TableHead className="w-20">#</TableHead>
+                          <TableHead className="w-24">Hora</TableHead>
+                          <TableHead className="w-24">Categoria</TableHead>
                           <TableHead>Mensagem de Log</TableHead>
                         </TableRow>
                       </TableHeader>
@@ -327,7 +414,9 @@ const ConversionProgress: React.FC<ConversionProgressProps> = ({
                         {logs.map((log, index) => (
                           <TableRow key={index} className={`${log.includes('ERROR') || log.includes('CRITICAL') ? 'text-red-500' : log.includes('WARNING') ? 'text-yellow-500' : ''}`}>
                             <TableCell className="py-1">{index + 1}</TableCell>
-                            <TableCell className="py-1 font-mono whitespace-pre-wrap break-all">{log}</TableCell>
+                            <TableCell className="py-1">{log.split(' ')[0]}</TableCell>
+                            <TableCell className="py-1">{log.includes('ERROR') ? 'ERROR' : log.includes('WARNING') ? 'WARN' : 'INFO'}</TableCell>
+                            <TableCell className="py-1 font-mono whitespace-pre-wrap break-all">{log.split(' ').slice(1).join(' ')}</TableCell>
                           </TableRow>
                         ))}
                       </TableBody>

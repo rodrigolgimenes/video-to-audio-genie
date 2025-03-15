@@ -28,7 +28,8 @@ const VideoToAudio: React.FC = () => {
     error,
     logs,
     extractAudio,
-    getOutputFileName
+    getOutputFileName,
+    allLogs
   } = useAudioExtraction();
 
   // Gather browser information for debugging
@@ -52,9 +53,13 @@ const VideoToAudio: React.FC = () => {
     }
     
     // Check browser's MP3 encoding capabilities
-    const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
-    info.sampleRate = audioContext.sampleRate;
-    info.audioState = audioContext.state;
+    try {
+      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+      info.sampleRate = audioContext.sampleRate;
+      info.audioState = audioContext.state;
+    } catch (e) {
+      info.audioContextError = (e as Error).message;
+    }
     
     setBrowserInfo(info);
   }, []);
