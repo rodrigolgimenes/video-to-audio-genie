@@ -7,10 +7,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Clipboard, Languages, Clock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
-import { TranscriptionResult } from '@/lib/transcriptionService';
+import type { TranscriptionResult as TranscriptionResultType } from '@/lib/transcriptionService';
 
 interface TranscriptionResultProps {
-  result: TranscriptionResult | null;
+  result: TranscriptionResultType | null;
   isLoading: boolean;
   error?: string | null;
 }
