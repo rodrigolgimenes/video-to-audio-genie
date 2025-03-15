@@ -25,6 +25,7 @@ export function useTranscription() {
       
       addLog('Iniciando processo de transcrição do áudio com Fast Whisper');
       addLog(`Tamanho do arquivo de áudio: ${(audioBlob.size / 1024 / 1024).toFixed(2)}MB`);
+      addLog('Conectando ao servidor fast-whisper real (não simulado)');
       
       const result = await transcribeAudio(audioBlob, (progress) => {
         addLog(progress);

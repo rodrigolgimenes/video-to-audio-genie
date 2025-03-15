@@ -130,7 +130,7 @@ const TranscriptionResult: React.FC<TranscriptionResultProps> = ({
         </Tabs>
       </CardContent>
       <CardFooter className="text-xs text-muted-foreground">
-        Transcrição gerada com Fast Whisper
+        Transcrição real gerada com Fast Whisper
       </CardFooter>
     </Card>
   );

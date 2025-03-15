@@ -13,7 +13,7 @@ export type TranscriptionResult = {
 };
 
 // Update the backend URL to point to your actual fast-whisper service
-const FAST_WHISPER_API_URL = 'http://localhost:9000/asr'; // Update this to your actual fast-whisper endpoint
+const FAST_WHISPER_API_URL = import.meta.env.VITE_FAST_WHISPER_API_URL || 'http://localhost:9000/asr';
 
 export const transcribeAudio = async (
   audioBlob: Blob, 
@@ -35,6 +35,7 @@ export const transcribeAudio = async (
     
     if (onProgress) {
       onProgress('Enviando áudio para servidor fast-whisper...');
+      onProgress(`Endpoint da API: ${FAST_WHISPER_API_URL}`);
     }
     
     // Send request to the actual fast-whisper API endpoint
