@@ -161,7 +161,7 @@ export async function convertAudioBufferToMp3(
       const baseUrl = window.location.origin;
       logWorker(`Base URL for resources: ${baseUrl}`);
       
-      // Create a worker with inline code - Fixed to avoid "Illegal return statement" error
+      // Create a worker with inline code - Fixed syntax error in the worker code
       const workerCode = `
         // Worker for MP3 encoding using lamejs
         
@@ -273,7 +273,7 @@ export async function convertAudioBufferToMp3(
               message: 'Test Mp3Encoder created successfully: ' + typeof testEncoder
             });
             
-            // Test if we can call its methods
+            // Test if the encoder has the expected methods
             if (typeof testEncoder.encodeBuffer === 'function') {
               self.postMessage({ 
                 type: 'log', 
@@ -462,7 +462,7 @@ export async function convertAudioBufferToMp3(
               self.postMessage({ 
                 type: 'log', 
                 message: 'WARNING: WAV channels (' + wavFormat.channels + 
-                          ') doesn\'t match expected channels (' + channels + ')'
+                          ') doesn\\'t match expected channels (' + channels + ')'
               });
             }
             
@@ -470,7 +470,7 @@ export async function convertAudioBufferToMp3(
               self.postMessage({ 
                 type: 'log', 
                 message: 'WARNING: WAV sample rate (' + wavFormat.sampleRate + 
-                          ') doesn\'t match expected sample rate (' + sampleRate + ')'
+                          ') doesn\\'t match expected sample rate (' + sampleRate + ')'
               });
             }
             
