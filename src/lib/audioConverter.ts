@@ -161,10 +161,38 @@ export async function convertAudioBufferToMp3(
       const baseUrl = window.location.origin;
       logWorker(`Base URL for resources: ${baseUrl}`);
       
-      // Create a worker with inline code - Fixed syntax error in the worker code
+      // Create a worker with inline code - Fixed syntax error in the worker code and improved worker initialization
       const workerCode = `
         // Worker for MP3 encoding using lamejs
         
+        // First, import the lamejs library 
+        try {
+          // Explicit import of lamejs library at initialization
+          importScripts('${baseUrl}/libs/lamejs/lame.all.js');
+          console.log('Worker: Successfully imported lamejs library via importScripts()');
+          self.postMessage({ type: 'log', message: 'WORKER INIT: Successfully imported lamejs library' });
+          
+          // Verify lamejs is available
+          if (typeof self.lamejs === 'undefined') {
+            console.error('Worker: lamejs not found after import');
+            self.postMessage({ type: 'log', message: 'WORKER INIT ERROR: lamejs not found after import' });
+            throw new Error('Failed to load lamejs library');
+          } else {
+            console.log('Worker: lamejs is available, type:', typeof self.lamejs);
+            self.postMessage({ type: 'log', message: 'WORKER INIT: lamejs is available, type: ' + typeof self.lamejs });
+          }
+        } catch (importError) {
+          console.error('Worker: Failed to import lamejs:', importError);
+          self.postMessage({ 
+            type: 'log', 
+            message: 'WORKER INIT ERROR: Failed to import lamejs: ' + importError.message 
+          });
+          self.postMessage({ 
+            type: 'error', 
+            error: 'Failed to import lamejs library: ' + importError.message 
+          });
+        }
+
         self.addEventListener('error', function(e) {
           console.error('Worker global error:', e.message);
           self.postMessage({ type: 'error', error: 'Worker error: ' + e.message });
@@ -177,23 +205,11 @@ export async function convertAudioBufferToMp3(
         let lameGlobal = null;
         
         try {
-          // Use full URL path to ensure the worker can find the library
-          const lameJsUrl = '${baseUrl}/libs/lamejs/lame.all.js';
-          console.log('Worker: Attempting to load lamejs from ' + lameJsUrl);
-          self.postMessage({ type: 'log', message: 'Worker: Attempting to load lamejs from ' + lameJsUrl });
+          // Verify lamejs is properly loaded
+          console.log('Worker: Verifying lamejs is loaded');
+          self.postMessage({ type: 'log', message: 'WORKER: Verifying lamejs is loaded' });
           
-          importScripts(lameJsUrl);
-          
-          // Check if lamejs is actually loaded
-          if (typeof self.lamejs === 'undefined') {
-            console.error('Worker: lamejs was not defined after importScripts!');
-            self.postMessage({ 
-              type: 'log', 
-              message: 'LAMEJS CHECK: lamejs was not defined after importScripts'
-            });
-            throw new Error('lamejs was not defined after importScripts');
-          }
-          
+          // Set the global reference
           lameGlobal = self.lamejs;
           console.log('Worker: lamejs library loaded successfully', typeof self.lamejs);
           console.log('Worker: lamejs Mp3Encoder available:', typeof self.lamejs.Mp3Encoder);
@@ -559,6 +575,23 @@ export async function convertAudioBufferToMp3(
               }
             }
             
+            // Check if channels are empty
+            if (leftChannel.length === 0) {
+              self.postMessage({ 
+                type: 'log', 
+                message: 'ERROR: Left channel data is empty!'
+              });
+              throw new Error('Left channel data is empty');
+            }
+            
+            if (channels > 1 && rightChannel && rightChannel.length === 0) {
+              self.postMessage({ 
+                type: 'log', 
+                message: 'ERROR: Right channel data is empty!'
+              });
+              throw new Error('Right channel data is empty');
+            }
+            
             // Check value ranges
             let minLeft = 32767, maxLeft = -32768;
             let minRight = 32767, maxRight = -32768;
@@ -586,6 +619,21 @@ export async function convertAudioBufferToMp3(
                 type: 'log', 
                 message: 'SAMPLE RANGES (first 1000): Mono min=' + minLeft + 
                           ', max=' + maxLeft
+              });
+            }
+            
+            // Verify sample data is valid (not all zeros)
+            if (minLeft === 0 && maxLeft === 0) {
+              self.postMessage({ 
+                type: 'log', 
+                message: 'WARNING: Left channel data appears to be all zeros!'
+              });
+            }
+            
+            if (channels > 1 && rightChannel && minRight === 0 && maxRight === 0) {
+              self.postMessage({ 
+                type: 'log', 
+                message: 'WARNING: Right channel data appears to be all zeros!'
               });
             }
             
@@ -860,3 +908,4 @@ export function createLogger(addLog: (message: string) => void): (message: strin
     addLog(message);
   };
 }
+

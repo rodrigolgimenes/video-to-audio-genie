@@ -2,7 +2,7 @@
 // Enhanced logger utility with detailed timestamps, categories, and user-friendly messaging
 
 // Log categories for better organization
-export type LogCategory = 'INFO' | 'ERROR' | 'DEBUG' | 'WARN' | 'LAMEJS' | 'WORKER' | 'DATA' | 'PROCESS' | 'FORMAT' | 'VALIDATION' | 'USER';
+export type LogCategory = 'INFO' | 'ERROR' | 'DEBUG' | 'WARN' | 'LAMEJS' | 'WORKER' | 'DATA' | 'PROCESS' | 'FORMAT' | 'VALIDATION' | 'USER' | 'CONVERTER';
 
 // Global array to store all logs for access across components
 let globalLogs: {message: string, category: LogCategory, timestamp: string}[] = [];
@@ -124,6 +124,10 @@ export const logValidation = (message: string) => {
   return log(message, 'VALIDATION');
 };
 
+export const logConverter = (message: string) => {
+  return log(message, 'CONVERTER');
+};
+
 // Helper function to format logs for UI display
 export const formatLogsForDisplay = () => {
   return globalLogs.map(log => {
@@ -146,3 +150,27 @@ export const getUserLogs = () => {
       return `${time} - ${log.message}`;
     });
 };
+
+// Get logs for specific tasks (filtered by patterns)
+export const getTaskLogs = (taskPatterns: string[]) => {
+  return globalLogs.filter(log => {
+    return taskPatterns.some(pattern => log.message.includes(pattern));
+  }).map(log => {
+    const time = log.timestamp.split('T')[1].split('.')[0];
+    return `${time} ${log.category}: ${log.message}`;
+  });
+};
+
+// Filter logs by a search term
+export const searchLogs = (term: string) => {
+  if (!term) return [];
+  
+  return globalLogs.filter(log => 
+    log.message.toLowerCase().includes(term.toLowerCase()) ||
+    log.category.toLowerCase().includes(term.toLowerCase())
+  ).map(log => {
+    const time = log.timestamp.split('T')[1].split('.')[0];
+    return `${time} ${log.category}: ${log.message}`;  
+  });
+};
+
